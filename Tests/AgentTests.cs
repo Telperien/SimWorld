@@ -73,13 +73,13 @@ public class AgentTests
         MakeFoodless(world, catalog);
         int initialCount = world.AliveCount;
 
-        for (int i = 0; i < 500; i++)
+        for (int i = 0; i < 1000; i++)
         {
             world.Tick(1.0 / 30.0);
         }
         Assert.Equal(initialCount, world.AliveCount);
 
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < 40; i++)
         {
             world.Tick(1.0 / 30.0);
         }
@@ -93,7 +93,7 @@ public class AgentTests
         var world = new World(seed: 21, size: 128, catalog);
 
         bool sawSeeking = false;
-        for (int i = 0; i < 350 && !sawSeeking; i++)
+        for (int i = 0; i < 700 && !sawSeeking; i++)
         {
             world.Tick(1.0 / 30.0);
             for (int a = 0; a < world.AliveCount; a++)
@@ -116,7 +116,7 @@ public class AgentTests
         var world = new World(seed: 4, size: 64, catalog);
         MakeFoodless(world, catalog);
 
-        for (int i = 0; i < 600; i++)
+        for (int i = 0; i < 1080; i++)
         {
             world.Tick(1.0 / 30.0);
         }

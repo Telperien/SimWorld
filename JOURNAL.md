@@ -130,3 +130,15 @@
   traits, SimReport. Non vérifié par moi : rendu réel des couleurs par
   état, disparition visuelle des agents morts, fluidité générale avec
   faim/recherche/repas actifs — à confirmer via F5.
+
+## Ajustement post-session 6 — vitesse et rythme de la faim
+- Fait (retour F5) : MoveSpeed doublée (2 → 4 tuiles/s). HungerIncreasePerThink
+  divisé par 2 (2 → 1, la faim monte ~2x plus lentement). La faim ne
+  retombe plus instantanément à 0 en arrivant sur la nourriture : elle
+  descend progressivement pendant tout Eating (HungerDecreasePerEatTick=8
+  sur EatingDuration=20 ticks), pour que "se nourrir" se voie comme un
+  processus plutôt qu'un reset. Tick counts des tests de faim/mort/
+  extinction recalculés en conséquence (délai de mort désormais ~1020
+  ticks). Ces constantes restent en dur dans World.cs, pas encore dans le
+  JSON — à garder en tête si d'autres ajustements de ressenti suivent.
+- Cassé : rien de connu, 15 tests toujours verts.

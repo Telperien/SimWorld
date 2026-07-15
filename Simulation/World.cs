@@ -7,10 +7,11 @@ public sealed class World
     private const double SpreadChance = 0.5;
     private const double AgentDensity = 0.00076;
     private const double IdleMoveChance = 0.1;
-    private const float MoveSpeed = 2f;
-    private const byte HungerIncreasePerThink = 2;
+    private const float MoveSpeed = 4f;
+    private const byte HungerIncreasePerThink = 1;
     private const byte HungerSeekThreshold = 150;
-    private const byte EatingDuration = 15;
+    private const byte HungerDecreasePerEatTick = 8;
+    private const byte EatingDuration = 20;
     private const double FoodRegenPerTick = 0.05;
     private const int MaxSearchRadius = 16;
     private const int BoxSide = MaxSearchRadius * 2 + 1;
@@ -275,7 +276,6 @@ public sealed class World
                 if (path.Count == 0)
                 {
                     ConsumeFood(currentX, currentY);
-                    agent.Hunger = 0;
                     agent.State = AgentState.Eating;
                     agent.EatingTimer = EatingDuration;
                 }
@@ -302,6 +302,7 @@ public sealed class World
     {
         if (agent.State == AgentState.Eating)
         {
+            agent.Hunger = (byte)Math.Max(0, agent.Hunger - HungerDecreasePerEatTick);
             agent.EatingTimer--;
             if (agent.EatingTimer == 0)
             {
@@ -351,7 +352,6 @@ public sealed class World
         if (GetFood(agent.TargetX, agent.TargetY) > 0)
         {
             ConsumeFood(agent.TargetX, agent.TargetY);
-            agent.Hunger = 0;
             agent.State = AgentState.Eating;
             agent.EatingTimer = EatingDuration;
         }
