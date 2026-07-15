@@ -5,17 +5,26 @@ public sealed class World
     private const ulong FnvOffsetBasis = 14695981039346656037UL;
     private const ulong FnvPrime = 1099511628211UL;
     private const double SpreadChance = 0.5;
+    private const double AgentDensity = 0.00076;
+    private const double IdleMoveChance = 0.1;
+    private const float MoveSpeed = 2f;
 
     private readonly byte[] _terrain;
     private readonly bool[] _burning;
+    private readonly Agent[] _agents;
     private readonly TerrainCatalog _catalog;
     private readonly Rng _rng;
     private readonly byte _ashId;
+    private int _tickCounter;
 
     private List<int> _activeCurrent = new();
     private List<int> _activeNext = new();
 
     public int Size { get; }
+
+    public int AgentCapacity => _agents.Length;
+
+    public int AliveCount { get; private set; }
 
     public World(int seed, int size, TerrainCatalog catalog)
     {
@@ -36,6 +45,9 @@ public sealed class World
         }
 
         GenerateTerrain();
+
+        _agents = new Agent[(int)(AgentDensity * size * size)];
+        SpawnAgents();
     }
 
     public byte GetTerrainId(int x, int y) => _terrain[y * Size + x];
@@ -43,6 +55,8 @@ public sealed class World
     public void SetTerrainId(int x, int y, byte id) => _terrain[y * Size + x] = id;
 
     public bool IsBurning(int x, int y) => _burning[y * Size + x];
+
+    public Agent GetAgent(int index) => _agents[index];
 
     public void Execute(ICommand command) => command.Execute(this);
 
@@ -72,6 +86,39 @@ public sealed class World
 
     public void Tick(double delta)
     {
+        TickFire();
+        TickAgents(delta);
+        _tickCounter++;
+    }
+
+    public ulong Hash()
+    {
+        ulong hash = FnvOffsetBasis;
+
+        foreach (byte b in _terrain)
+        {
+            Mix(ref hash, b);
+        }
+
+        for (int i = 0; i < _agents.Length; i++)
+        {
+            ref Agent agent = ref _agents[i];
+            Mix(ref hash, BitConverter.SingleToUInt32Bits(agent.X));
+            Mix(ref hash, BitConverter.SingleToUInt32Bits(agent.Y));
+            Mix(ref hash, (byte)agent.State);
+        }
+
+        return hash;
+    }
+
+    private static void Mix(ref ulong hash, ulong value)
+    {
+        hash ^= value;
+        hash *= FnvPrime;
+    }
+
+    private void TickFire()
+    {
         _activeNext.Clear();
 
         foreach (int index in _activeCurrent)
@@ -91,17 +138,6 @@ public sealed class World
         List<int> swap = _activeCurrent;
         _activeCurrent = _activeNext;
         _activeNext = swap;
-    }
-
-    public ulong Hash()
-    {
-        ulong hash = FnvOffsetBasis;
-        foreach (byte b in _terrain)
-        {
-            hash ^= b;
-            hash *= FnvPrime;
-        }
-        return hash;
     }
 
     private void TrySpreadTo(int x, int y)
@@ -135,6 +171,103 @@ public sealed class World
 
         _burning[index] = true;
         active.Add(index);
+    }
+
+    private void TickAgents(double delta)
+    {
+        int group = _tickCounter & 3;
+        float step = MoveSpeed * (float)delta;
+
+        for (int i = 0; i < _agents.Length; i++)
+        {
+            ref Agent agent = ref _agents[i];
+
+            if (agent.State == AgentState.Idle)
+            {
+                if ((i & 3) == group && _rng.NextDouble() < IdleMoveChance)
+                {
+                    TryStartMoving(ref agent);
+                }
+                continue;
+            }
+
+            float targetCenterX = agent.TargetX + 0.5f;
+            float targetCenterY = agent.TargetY + 0.5f;
+            float dx = targetCenterX - agent.X;
+            float dy = targetCenterY - agent.Y;
+            float distanceSquared = dx * dx + dy * dy;
+
+            if (distanceSquared <= step * step)
+            {
+                agent.X = targetCenterX;
+                agent.Y = targetCenterY;
+                agent.State = AgentState.Idle;
+            }
+            else
+            {
+                float distance = MathF.Sqrt(distanceSquared);
+                agent.X += dx / distance * step;
+                agent.Y += dy / distance * step;
+            }
+        }
+    }
+
+    private void TryStartMoving(ref Agent agent)
+    {
+        int currentX = (int)MathF.Floor(agent.X);
+        int currentY = (int)MathF.Floor(agent.Y);
+
+        int direction = (int)(_rng.NextUInt64() & 3);
+        int dx = direction == 0 ? -1 : direction == 1 ? 1 : 0;
+        int dy = direction == 2 ? -1 : direction == 3 ? 1 : 0;
+
+        int targetX = currentX + dx;
+        int targetY = currentY + dy;
+
+        if (targetX < 0 || targetX >= Size || targetY < 0 || targetY >= Size)
+        {
+            return;
+        }
+
+        if (!_catalog.Get(_terrain[targetY * Size + targetX]).Walkable)
+        {
+            return;
+        }
+
+        agent.TargetX = targetX;
+        agent.TargetY = targetY;
+        agent.State = AgentState.Moving;
+    }
+
+    private void SpawnAgents()
+    {
+        int spawned = 0;
+        while (spawned < _agents.Length)
+        {
+            int x = (int)(_rng.NextDouble() * Size);
+            int y = (int)(_rng.NextDouble() * Size);
+
+            if (!_catalog.Get(_terrain[y * Size + x]).Walkable)
+            {
+                continue;
+            }
+
+            _agents[spawned] = new Agent
+            {
+                X = x + 0.5f,
+                Y = y + 0.5f,
+                TargetX = x,
+                TargetY = y,
+                MotherId = -1,
+                FatherId = -1,
+                Tracked = false,
+                State = AgentState.Idle,
+                Species = 0,
+            };
+            spawned++;
+        }
+
+        AliveCount = spawned;
     }
 
     private void GenerateTerrain()

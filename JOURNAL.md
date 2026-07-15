@@ -70,3 +70,28 @@
   le rendu du feu à l'écran (couleur orange, disparition en cendre),
   le ressenti de fluidité à 30 Hz, la conversion clic→tuile en jeu réel
   avec zoom/pan — à confirmer via F5.
+
+## Session 5 — Les agents existent
+- Fait : struct Agent (position continue X/Y float pour un mouvement
+  fluide, TargetX/TargetY pour la tuile visée, MotherId/FatherId/Tracked
+  prévus mais inutilisés, State Idle/Moving, Species toujours 0). World
+  alloue Agent[] une fois (densité × surface, ~200 agents à 512², jamais
+  un nombre absolu en dur) et spawne uniquement sur tuiles walkable via
+  le même Rng seedé que la génération de terrain. Mise à jour étalée :
+  la décision Idle→Moving n'a lieu que pour 1/4 des agents par tick
+  (index % 4), l'interpolation de mouvement avance à chaque tick pour
+  rester fluide à 30 Hz (Tick(delta) utilise enfin son paramètre delta).
+  Hash() étendu aux positions/états des agents (déterminisme vérifié
+  bout en bout). Rendu via un seul MultiMeshInstance2D (AgentRenderer.cs,
+  QuadMesh 3x3) qui lit World en lecture seule, sans influence sur la
+  simulation. 12 tests verts (8 précédents + 4 nouveaux : spawn sur
+  walkable uniquement, densité dans la fourchette attendue, déterminisme
+  multi-instances, et Tick_StillAllocatesNothing — zéro octet alloué sur
+  50 ticks avec agents actifs, testé volontairement sans feu actif pour
+  isoler ce qui est vérifié).
+- Cassé : rien de connu côté build/tests.
+- Prochaine fois : v0.2 suite — faim, mort, reproduction régulée par
+  capacité de charge, SimReport (rapport texte pop/civs/anomalies). Non
+  vérifié par moi : le rendu réel des agents à l'écran (points visibles,
+  mouvement perceptible, un seul draw call sans ralentissement avec
+  terrain 512² + feu + ~200 agents) — à confirmer via F5.

@@ -9,7 +9,8 @@ public partial class WorldRenderer : Sprite2D
     private const int FireRadius = 3;
     private static readonly Color FireColor = new(1f, 0.4f, 0f);
 
-    private World _world = null!;
+    public World World { get; private set; } = null!;
+
     private TerrainCatalog _catalog = null!;
     private Image _image = null!;
     private ImageTexture _texture = null!;
@@ -19,7 +20,7 @@ public partial class WorldRenderer : Sprite2D
     {
         string json = FileAccess.GetFileAsString("res://data/terrain.json");
         _catalog = TerrainCatalog.Load(json);
-        _world = new World(Seed, Size, _catalog);
+        World = new World(Seed, Size, _catalog);
 
         _image = Image.CreateEmpty(Size, Size, false, Image.Format.Rgb8);
         _texture = ImageTexture.CreateFromImage(_image);
@@ -35,7 +36,7 @@ public partial class WorldRenderer : Sprite2D
 
         while (_accumulator >= TickInterval)
         {
-            _world.Tick(TickInterval);
+            World.Tick(TickInterval);
             _accumulator -= TickInterval;
             ticked = true;
         }
@@ -53,7 +54,7 @@ public partial class WorldRenderer : Sprite2D
             Vector2 worldPosition = GetGlobalMousePosition();
             int x = (int)Mathf.Floor(worldPosition.X);
             int y = (int)Mathf.Floor(worldPosition.Y);
-            _world.Execute(new SpawnFire(x, y, FireRadius));
+            World.Execute(new SpawnFire(x, y, FireRadius));
         }
     }
 
@@ -63,9 +64,9 @@ public partial class WorldRenderer : Sprite2D
         {
             for (int x = 0; x < Size; x++)
             {
-                Color color = _world.IsBurning(x, y)
+                Color color = World.IsBurning(x, y)
                     ? FireColor
-                    : ColorFromHex(_catalog.Get(_world.GetTerrainId(x, y)).Color);
+                    : ColorFromHex(_catalog.Get(World.GetTerrainId(x, y)).Color);
                 _image.SetPixel(x, y, color);
             }
         }
