@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- ImplicitUsings ajoute System.IO par défaut : interdit dans /Simulation (CLAUDE.md). -->
+    <Using Remove="System.IO" />
+  </ItemGroup>
+
 </Project>
