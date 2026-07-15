@@ -27,3 +27,19 @@
   simu) + clic. Le côté Godot n'a toujours pas de loader qui lit
   data/terrain.json ni de rendu ; à faire quand le rendu (Image 512²)
   arrivera.
+
+## Session 3 — Premiers pixels
+- Fait : Main.tscn (Sprite2D + Camera2D) devient la main_scene ; F5 lance
+  directement le terrain généré par World(seed 42, size 512). WorldRenderer
+  (scripts/) lit World/TerrainCatalog une fois en _Ready et peint une Image
+  pixel par pixel. CameraController gère le pan aux flèches et le zoom par
+  paliers {1,2,4,8} à la molette, position caméra arrondie au pixel à
+  chaque frame. Filtre de texture Nearest et stretch aspect "keep" réglés
+  dans project.godot. Confirmé par `dotnet msbuild -getItem:Compile` que
+  seuls les deux scripts de /scripts sont compilés côté WorldSim (pas de
+  fuite de /Simulation ou /Tests). Tests session 2 toujours verts.
+- Cassé : rien de connu côté build/tests.
+- Prochaine fois : v0.1 — couche ICommand + feu. Non vérifié par moi :
+  le rendu réel à l'écran, le zoom/pan en main, l'absence de
+  scintillement pixel art — pas de binaire Godot en CLI sur cette
+  machine pour un test headless, à confirmer via F5.
