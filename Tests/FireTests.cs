@@ -10,6 +10,12 @@ public class FireTests
         return TerrainCatalog.Load(File.ReadAllText(path));
     }
 
+    private static VegetationCatalog LoadVegetationCatalog()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
+        return VegetationCatalog.Load(File.ReadAllText(path));
+    }
+
     private static void FillGrass(World world, TerrainCatalog catalog, int minX, int minY, int maxX, int maxY)
     {
         catalog.TryGetId("grass", out byte grass);
@@ -26,7 +32,8 @@ public class FireTests
     public void Fire_SpreadsOnFlammableTerrain()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 7, size: 32, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 7, size: 32, catalog, vegetation);
         FillGrass(world, catalog, 10, 10, 20, 20);
         catalog.TryGetId("ash", out byte ash);
 
@@ -57,7 +64,8 @@ public class FireTests
     public void Fire_StopsAtWater()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 7, size: 16, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 7, size: 16, catalog, vegetation);
         catalog.TryGetId("grass", out byte grass);
         catalog.TryGetId("water", out byte water);
 
@@ -78,7 +86,8 @@ public class FireTests
     public void Fire_BecomesAsh_AfterBurning()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 3, size: 16, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 3, size: 16, catalog, vegetation);
         catalog.TryGetId("grass", out byte grass);
         catalog.TryGetId("ash", out byte ash);
         world.SetTerrainId(5, 5, grass);
@@ -96,9 +105,10 @@ public class FireTests
     public void Fire_Propagation_IsDeterministic_ForSameSeed()
     {
         var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
 
-        var a = new World(seed: 11, size: 32, catalog);
-        var b = new World(seed: 11, size: 32, catalog);
+        var a = new World(seed: 11, size: 32, catalog, vegetation);
+        var b = new World(seed: 11, size: 32, catalog, vegetation);
         FillGrass(a, catalog, 5, 5, 25, 25);
         FillGrass(b, catalog, 5, 5, 25, 25);
 
@@ -112,5 +122,23 @@ public class FireTests
         }
 
         Assert.Equal(a.Hash(), b.Hash());
+    }
+
+    [Fact]
+    public void Trees_AreFlammable_AndBurnLikeTerrain()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 13, size: 16, catalog, vegetation);
+
+        catalog.TryGetId("grass", out byte grass);
+        vegetation.TryGetId("tree", out byte treeType);
+        world.SetTerrainId(6, 6, grass);
+        world.ForceSpawnVegetation(6, 6, treeType, stage: 0);
+
+        world.Execute(new SpawnFire(6, 6, radius: 0));
+        world.Tick(0);
+
+        Assert.False(world.TryGetVegetationAt(6, 6, out _));
     }
 }

@@ -1,10 +1,12 @@
 namespace Simulation;
 
-public sealed class TerrainType
+public sealed class VegetationType
 {
     public required string Name { get; init; }
     public required byte Id { get; init; }
     public required uint Color { get; init; }
-    public required bool Walkable { get; init; }
+    public required int MatureStage { get; init; }
+    public required double SpawnChance { get; init; }
     public required bool Flammable { get; init; }
+    public required int FoodValue { get; init; }
 }

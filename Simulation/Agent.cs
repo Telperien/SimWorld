@@ -22,4 +22,7 @@ public struct Agent
     public byte Species;
     public byte Hunger;
     public byte EatingTimer;
+
+    // 0 = droite, 1 = gauche.
+    public byte Facing;
 }

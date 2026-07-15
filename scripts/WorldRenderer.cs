@@ -12,15 +12,20 @@ public partial class WorldRenderer : Sprite2D
     public World World { get; private set; } = null!;
 
     private TerrainCatalog _catalog = null!;
+    private VegetationCatalog _vegetationCatalog = null!;
     private Image _image = null!;
     private ImageTexture _texture = null!;
     private double _accumulator;
 
     public override void _Ready()
     {
-        string json = FileAccess.GetFileAsString("res://data/terrain.json");
-        _catalog = TerrainCatalog.Load(json);
-        World = new World(Seed, Size, _catalog);
+        string terrainJson = FileAccess.GetFileAsString("res://data/terrain.json");
+        _catalog = TerrainCatalog.Load(terrainJson);
+
+        string vegetationJson = FileAccess.GetFileAsString("res://data/vegetation.json");
+        _vegetationCatalog = VegetationCatalog.Load(vegetationJson);
+
+        World = new World(Seed, Size, _catalog, _vegetationCatalog);
 
         _image = Image.CreateEmpty(Size, Size, false, Image.Format.Rgb8);
         _texture = ImageTexture.CreateFromImage(_image);
@@ -69,6 +74,18 @@ public partial class WorldRenderer : Sprite2D
                     : ColorFromHex(_catalog.Get(World.GetTerrainId(x, y)).Color);
                 _image.SetPixel(x, y, color);
             }
+        }
+
+        for (int i = 0; i < World.VegetationCount; i++)
+        {
+            Vegetation vegetation = World.GetVegetation(i);
+            if (World.IsBurning(vegetation.X, vegetation.Y))
+            {
+                continue;
+            }
+
+            Color color = ColorFromHex(_vegetationCatalog.Get(vegetation.Type).Color);
+            _image.SetPixel(vegetation.X, vegetation.Y, color);
         }
 
         _texture.Update(_image);

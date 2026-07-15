@@ -1,7 +1,7 @@
 {
-  "water": { "id": 0, "color": "#3a6ea5", "walkable": false, "flammable": false, "foodCapacity": 0 },
-  "sand":  { "id": 1, "color": "#d9c18f", "walkable": true,  "flammable": false, "foodCapacity": 0 },
-  "grass": { "id": 2, "color": "#5b8f3c", "walkable": true,  "flammable": true,  "foodCapacity": 100 },
-  "stone": { "id": 3, "color": "#8a8a8a", "walkable": true,  "flammable": false, "foodCapacity": 0 },
-  "ash":   { "id": 4, "color": "#4a4a4a", "walkable": true,  "flammable": false, "foodCapacity": 0 }
+  "water": { "id": 0, "color": "#3a6ea5", "walkable": false, "flammable": false },
+  "sand":  { "id": 1, "color": "#d9c18f", "walkable": true,  "flammable": false },
+  "grass": { "id": 2, "color": "#5b8f3c", "walkable": true,  "flammable": true },
+  "stone": { "id": 3, "color": "#8a8a8a", "walkable": true,  "flammable": false },
+  "ash":   { "id": 4, "color": "#4a4a4a", "walkable": true,  "flammable": false }
 }

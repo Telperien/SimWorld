@@ -10,6 +10,12 @@ public class AgentTests
         return TerrainCatalog.Load(File.ReadAllText(path));
     }
 
+    private static VegetationCatalog LoadVegetationCatalog()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
+        return VegetationCatalog.Load(File.ReadAllText(path));
+    }
+
     private static void MakeFoodless(World world, TerrainCatalog catalog)
     {
         catalog.TryGetId("sand", out byte sand);
@@ -26,7 +32,8 @@ public class AgentTests
     public void Agents_SpawnOnlyOnWalkableTiles()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 5, size: 128, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 5, size: 128, catalog, vegetation);
 
         for (int i = 0; i < world.AgentCapacity; i++)
         {
@@ -42,7 +49,8 @@ public class AgentTests
     public void Agents_Count_MatchesRequestedDensity()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 1, size: 512, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 1, size: 512, catalog, vegetation);
 
         Assert.InRange(world.AgentCapacity, 150, 250);
         Assert.Equal(world.AgentCapacity, world.AliveCount);
@@ -52,9 +60,10 @@ public class AgentTests
     public void Agents_Movement_IsDeterministic_ForSameSeed()
     {
         var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
 
-        var a = new World(seed: 21, size: 128, catalog);
-        var b = new World(seed: 21, size: 128, catalog);
+        var a = new World(seed: 21, size: 128, catalog, vegetation);
+        var b = new World(seed: 21, size: 128, catalog, vegetation);
 
         for (int i = 0; i < 550; i++)
         {
@@ -69,7 +78,8 @@ public class AgentTests
     public void Agent_Dies_WithoutFood_AfterThreshold()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 3, size: 64, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 3, size: 64, catalog, vegetation);
         MakeFoodless(world, catalog);
         int initialCount = world.AliveCount;
 
@@ -90,7 +100,8 @@ public class AgentTests
     public void Agent_SeeksFood_WhenHungry()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 21, size: 128, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 21, size: 128, catalog, vegetation);
 
         bool sawSeeking = false;
         for (int i = 0; i < 700 && !sawSeeking; i++)
@@ -113,7 +124,8 @@ public class AgentTests
     public void Population_Extinguishes_OnFoodlessMap()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 4, size: 64, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 4, size: 64, catalog, vegetation);
         MakeFoodless(world, catalog);
 
         for (int i = 0; i < 1080; i++)
@@ -125,10 +137,37 @@ public class AgentTests
     }
 
     [Fact]
+    public void Agent_EatsFromMatureBush_HungerDecreases()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 6, size: 64, catalog, vegetation);
+
+        catalog.TryGetId("grass", out byte grass);
+        vegetation.TryGetId("bush", out byte bushType);
+        byte matureStage = (byte)vegetation.Get(bushType).MatureStage;
+
+        Agent agent = world.GetAgent(0);
+        int x = (int)MathF.Floor(agent.X);
+        int y = (int)MathF.Floor(agent.Y);
+        world.SetTerrainId(x, y, grass);
+        world.ForceSpawnVegetation(x, y, bushType, matureStage);
+        world.SetAgentHunger(0, 200);
+
+        for (int i = 0; i < 20; i++)
+        {
+            world.Tick(1.0 / 30.0);
+        }
+
+        Assert.True(world.GetAgent(0).Hunger < 200);
+    }
+
+    [Fact]
     public void Tick_StillAllocatesNothing()
     {
         var catalog = LoadCatalog();
-        var world = new World(seed: 9, size: 128, catalog);
+        var vegetation = LoadVegetationCatalog();
+        var world = new World(seed: 9, size: 128, catalog, vegetation);
 
         for (int i = 0; i < 5; i++)
         {

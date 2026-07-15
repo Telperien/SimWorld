@@ -10,13 +10,20 @@ public class WorldTests
         return TerrainCatalog.Load(File.ReadAllText(path));
     }
 
+    private static VegetationCatalog LoadVegetationCatalog()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
+        return VegetationCatalog.Load(File.ReadAllText(path));
+    }
+
     [Fact]
     public void World_SameSeed_ProducesSameTerrain()
     {
         var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
 
-        var a = new World(seed: 42, size: 64, catalog);
-        var b = new World(seed: 42, size: 64, catalog);
+        var a = new World(seed: 42, size: 64, catalog, vegetation);
+        var b = new World(seed: 42, size: 64, catalog, vegetation);
 
         Assert.Equal(a.Hash(), b.Hash());
     }
@@ -25,9 +32,10 @@ public class WorldTests
     public void World_DifferentSeed_ProducesDifferentTerrain()
     {
         var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
 
-        var a = new World(seed: 1, size: 64, catalog);
-        var b = new World(seed: 2, size: 64, catalog);
+        var a = new World(seed: 1, size: 64, catalog, vegetation);
+        var b = new World(seed: 2, size: 64, catalog, vegetation);
 
         Assert.NotEqual(a.Hash(), b.Hash());
     }
@@ -36,8 +44,9 @@ public class WorldTests
     public void World_RejectsNonPowerOfTwoSize()
     {
         var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
 
-        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog));
+        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation));
     }
 
     [Fact]

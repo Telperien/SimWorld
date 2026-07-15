@@ -1,0 +1,4 @@
+{
+  "bush": { "id": 0, "color": "#3f7d32", "matureStage": 5,  "spawnChance": 0.003,  "flammable": false, "foodValue": 160 },
+  "tree": { "id": 1, "color": "#2d5a27", "matureStage": 30, "spawnChance": 0.0004, "flammable": true,  "foodValue": 0 }
+}

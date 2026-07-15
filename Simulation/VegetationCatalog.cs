@@ -2,22 +2,22 @@ using System.Text.Json;
 
 namespace Simulation;
 
-public sealed class TerrainCatalog
+public sealed class VegetationCatalog
 {
-    private readonly TerrainType?[] _byId;
+    private readonly VegetationType?[] _byId;
     private readonly Dictionary<string, byte> _idByName;
 
-    private TerrainCatalog(TerrainType?[] byId, Dictionary<string, byte> idByName)
+    private VegetationCatalog(VegetationType?[] byId, Dictionary<string, byte> idByName)
     {
         _byId = byId;
         _idByName = idByName;
     }
 
-    public static TerrainCatalog Load(string json)
+    public static VegetationCatalog Load(string json)
     {
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var dtos = JsonSerializer.Deserialize<Dictionary<string, TerrainDto>>(json, options)
-            ?? throw new ArgumentException("terrain JSON is empty or invalid", nameof(json));
+        var dtos = JsonSerializer.Deserialize<Dictionary<string, VegetationDto>>(json, options)
+            ?? throw new ArgumentException("vegetation JSON is empty or invalid", nameof(json));
 
         byte maxId = 0;
         foreach (var entry in dtos)
@@ -28,29 +28,31 @@ public sealed class TerrainCatalog
             }
         }
 
-        var byId = new TerrainType?[maxId + 1];
+        var byId = new VegetationType?[maxId + 1];
         var idByName = new Dictionary<string, byte>(dtos.Count);
 
         foreach (var (name, dto) in dtos)
         {
-            var terrain = new TerrainType
+            var vegetation = new VegetationType
             {
                 Name = name,
                 Id = dto.Id,
                 Color = ParseColor(dto.Color),
-                Walkable = dto.Walkable,
+                MatureStage = dto.MatureStage,
+                SpawnChance = dto.SpawnChance,
                 Flammable = dto.Flammable,
+                FoodValue = dto.FoodValue,
             };
-            byId[dto.Id] = terrain;
+            byId[dto.Id] = vegetation;
             idByName[name] = dto.Id;
         }
 
-        return new TerrainCatalog(byId, idByName);
+        return new VegetationCatalog(byId, idByName);
     }
 
-    public TerrainType Get(byte id)
+    public VegetationType Get(byte id)
     {
-        return _byId[id] ?? throw new ArgumentException($"no terrain registered for id {id}", nameof(id));
+        return _byId[id] ?? throw new ArgumentException($"no vegetation registered for id {id}", nameof(id));
     }
 
     public bool TryGetId(string name, out byte id) => _idByName.TryGetValue(name, out id);
@@ -61,5 +63,5 @@ public sealed class TerrainCatalog
         return Convert.ToUInt32(trimmed, 16);
     }
 
-    private sealed record TerrainDto(byte Id, string Color, bool Walkable, bool Flammable);
+    private sealed record VegetationDto(byte Id, string Color, int MatureStage, double SpawnChance, bool Flammable, int FoodValue);
 }

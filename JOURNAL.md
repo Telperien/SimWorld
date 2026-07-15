@@ -142,3 +142,45 @@
   ticks). Ces constantes restent en dur dans World.cs, pas encore dans le
   JSON — à garder en tête si d'autres ajustements de ressenti suivent.
 - Cassé : rien de connu, 15 tests toujours verts.
+
+## Session 7 — Végétation et agents en sprite 3x3
+- Fait : le mécanisme de "nourriture dérivée par tuile" (session 6) est
+  remplacé par de vraies entités Vegetation (buisson/arbre), stockées en
+  tableau préalloué compacté par swap-with-last (même pattern que
+  Agent[]/AliveCount), plus un tableau miroir _vegetationIndexAt (tuile →
+  slot, -1 = rien) pour un lookup O(1) sans Dictionary. Buissons : jeune
+  → mûr sur un tick séparé, beaucoup plus lent (~1 Hz, toutes les 30
+  tuiles-tick) ; mangés, ils redeviennent jeunes plutôt que disparaître
+  (ressource renouvelable au même endroit, cohérent avec la capacité de
+  charge à venir). Repousse spontanée : balayage complet des tuiles
+  d'herbe vides, mais explicitement hors du chemin chaud 30 Hz (règle
+  CLAUDE.md — un tick séparé peut se permettre ce que le tick tuiles ne
+  peut pas). Arbres : 0 nourriture (réservés au futur système de bois),
+  poussent plus rarement/lentement, flammable=true dans vegetation.json
+  et réellement branchés sur TickFire — un arbre est détruit quand sa
+  tuile finit de brûler, un buisson (flammable=false) survit. La
+  recherche de nourriture des agents (BFS bornée, session 6) cible
+  maintenant les buissons mûrs au lieu des tuiles-nourriture ; manger
+  remet le buisson à Stage=0 et calcule EatingTimer depuis le FoodValue
+  du JSON (foodValue / HungerDecreasePerEatTick), sans nouveau champ sur
+  Agent. Rendu : agents en sprite ASCII 3x3 asymétrique (".#.","##.",".#.")
+  parsé une fois en texture blanche/transparente, partagée par toutes les
+  instances MultiMesh — la teinte par état (session 6) continue de
+  fonctionner par multiplication. Variante gauche/droite = flip du
+  Transform2D (échelle X) selon le nouveau champ Agent.Facing, pas deux
+  textures. Végétation peinte dans la texture de la carte (statique,
+  pas MultiMesh), une passe proportionnelle à VegetationCount après le
+  terrain+feu. 19 tests verts (15 précédents adaptés à la nouvelle
+  signature World(seed,size,catalog,vegetationCatalog) + 4 nouveaux :
+  croissance jeune→mûr, repousse spontanée, arbre détruit par le feu,
+  agent qui mange un buisson voit sa faim baisser).
+- Cassé : rien de connu côté build/tests. Point technique découvert en
+  testant : à très petite taille de monde (32² avec la densité
+  d'agents actuelle), la capacité peut tomber à 0 agent — corrigé en
+  session en utilisant 64² pour le test qui a besoin d'au moins un agent.
+- Prochaine fois : reproduction régulée par la capacité de charge
+  (maintenant que la nourriture est une vraie ressource spatiale, la
+  capacité de charge peut se brancher dessus), castes/traits, SimReport.
+  Non vérifié par moi : le sprite 3x3 et son flip à l'écran, les
+  couleurs de végétation sur la carte, l'apparition/repousse visible des
+  buissons, la disparition des arbres en feu — à confirmer via F5.
