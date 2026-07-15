@@ -40,6 +40,7 @@ public sealed class TerrainCatalog
                 Color = ParseColor(dto.Color),
                 Walkable = dto.Walkable,
                 Flammable = dto.Flammable,
+                FoodCapacity = dto.FoodCapacity,
             };
             byId[dto.Id] = terrain;
             idByName[name] = dto.Id;
@@ -61,5 +62,5 @@ public sealed class TerrainCatalog
         return Convert.ToUInt32(trimmed, 16);
     }
 
-    private sealed record TerrainDto(byte Id, string Color, bool Walkable, bool Flammable);
+    private sealed record TerrainDto(byte Id, string Color, bool Walkable, bool Flammable, int FoodCapacity);
 }

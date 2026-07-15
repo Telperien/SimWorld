@@ -4,6 +4,9 @@ public enum AgentState : byte
 {
     Idle = 0,
     Moving = 1,
+    Seeking = 2,
+    Eating = 3,
+    Dead = 4,
 }
 
 public struct Agent
@@ -17,4 +20,6 @@ public struct Agent
     public bool Tracked;
     public AgentState State;
     public byte Species;
+    public byte Hunger;
+    public byte EatingTimer;
 }

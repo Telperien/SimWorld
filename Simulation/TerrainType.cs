@@ -7,4 +7,5 @@ public sealed class TerrainType
     public required uint Color { get; init; }
     public required bool Walkable { get; init; }
     public required bool Flammable { get; init; }
+    public required int FoodCapacity { get; init; }
 }

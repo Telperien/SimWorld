@@ -10,6 +10,18 @@ public class AgentTests
         return TerrainCatalog.Load(File.ReadAllText(path));
     }
 
+    private static void MakeFoodless(World world, TerrainCatalog catalog)
+    {
+        catalog.TryGetId("sand", out byte sand);
+        for (int y = 0; y < world.Size; y++)
+        {
+            for (int x = 0; x < world.Size; x++)
+            {
+                world.SetTerrainId(x, y, sand);
+            }
+        }
+    }
+
     [Fact]
     public void Agents_SpawnOnlyOnWalkableTiles()
     {
@@ -44,13 +56,72 @@ public class AgentTests
         var a = new World(seed: 21, size: 128, catalog);
         var b = new World(seed: 21, size: 128, catalog);
 
-        for (int i = 0; i < 40; i++)
+        for (int i = 0; i < 550; i++)
         {
             a.Tick(1.0 / 30.0);
             b.Tick(1.0 / 30.0);
         }
 
         Assert.Equal(a.Hash(), b.Hash());
+    }
+
+    [Fact]
+    public void Agent_Dies_WithoutFood_AfterThreshold()
+    {
+        var catalog = LoadCatalog();
+        var world = new World(seed: 3, size: 64, catalog);
+        MakeFoodless(world, catalog);
+        int initialCount = world.AliveCount;
+
+        for (int i = 0; i < 500; i++)
+        {
+            world.Tick(1.0 / 30.0);
+        }
+        Assert.Equal(initialCount, world.AliveCount);
+
+        for (int i = 0; i < 20; i++)
+        {
+            world.Tick(1.0 / 30.0);
+        }
+        Assert.True(world.AliveCount < initialCount);
+    }
+
+    [Fact]
+    public void Agent_SeeksFood_WhenHungry()
+    {
+        var catalog = LoadCatalog();
+        var world = new World(seed: 21, size: 128, catalog);
+
+        bool sawSeeking = false;
+        for (int i = 0; i < 350 && !sawSeeking; i++)
+        {
+            world.Tick(1.0 / 30.0);
+            for (int a = 0; a < world.AliveCount; a++)
+            {
+                if (world.GetAgent(a).State == AgentState.Seeking)
+                {
+                    sawSeeking = true;
+                    break;
+                }
+            }
+        }
+
+        Assert.True(sawSeeking);
+    }
+
+    [Fact]
+    public void Population_Extinguishes_OnFoodlessMap()
+    {
+        var catalog = LoadCatalog();
+        var world = new World(seed: 4, size: 64, catalog);
+        MakeFoodless(world, catalog);
+
+        for (int i = 0; i < 600; i++)
+        {
+            world.Tick(1.0 / 30.0);
+        }
+
+        Assert.Equal(0, world.AliveCount);
     }
 
     [Fact]

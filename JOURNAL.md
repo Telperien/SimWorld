@@ -95,3 +95,38 @@
   vérifié par moi : le rendu réel des agents à l'écran (points visibles,
   mouvement perceptible, un seul draw call sans ralentissement avec
   terrain 512² + feu + ~200 agents) — à confirmer via F5.
+
+## Session 6 — Faim, nourriture, mort, FSM complète
+- Fait : Agent gagne Hunger (byte, incrément fixe par tick de réflexion —
+  délai de mort exact et déterministe, pas d'accumulation flottante) et
+  EatingTimer. FSM étendue à Idle/Moving/Seeking/Eating/Dead. Nourriture
+  data-driven (terrain.json : foodCapacity=100 sur grass, 0 ailleurs),
+  stockée comme une simple date de dernier repas par tuile et **dérivée**
+  à la demande (min(capacité, ticksÉcoulés × régénération)) — jamais de
+  balayage complet pour la régénération, cohérent avec la règle "capacités
+  dérivées, jamais stockées" déjà dans CLAUDE.md. Recherche de nourriture :
+  BFS 4-directionnelle bornée à un rayon fixe (16, boîte locale 33x33)
+  directement sur la grille de terrain — pas de grille spatiale séparée,
+  justifié dans le plan (la ressource est déjà une propriété de tuile,
+  donc déjà indexée en O(1) ; le vrai A* avec heuristique n'aurait rien
+  vers quoi pointer tant qu'il n'y a pas de cible connue à l'avance).
+  Chemin stocké par agent dans une List<int> réutilisée (jamais de
+  Dictionary/HashSet). Nettoyage en fin de tick : swap-with-last O(1) par
+  mort, avec échange en miroir des listes de chemin pour rester associées
+  au bon agent après le swap. Rendu : couleur par état (rouge/orange/vert),
+  VisibleInstanceCount suit AliveCount (les morts disparaissent sans
+  reconstruire le MultiMesh). 15 tests verts (12 précédents + 3 nouveaux :
+  mort après délai exact ~512 ticks calculé à la main, recherche de
+  nourriture observée en Seeking, extinction totale sur carte sans
+  nourriture) ; le test de déterminisme allongé à 550 ticks pour traverser
+  tout le FSM ; Tick_StillAllocatesNothing inchangé (sa fenêtre de mesure
+  est plus courte que le délai d'apparition de la faim, donc jamais
+  affectée par le nouveau chemin BFS).
+- Cassé : rien de connu côté build/tests. À noter (pas un bug) : sur une
+  carte sans nourriture, tous les agents meurent au même tick — incrément
+  de faim fixe et étalement parfaitement synchronisé entre les 4 groupes,
+  donc "délai fixe" produit une mort groupée plutôt qu'étalée.
+- Prochaine fois : reproduction régulée par la capacité de charge, castes/
+  traits, SimReport. Non vérifié par moi : rendu réel des couleurs par
+  état, disparition visuelle des agents morts, fluidité générale avec
+  faim/recherche/repas actifs — à confirmer via F5.
