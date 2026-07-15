@@ -17,10 +17,14 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore (Simulation + Tests only)
-        run: dotnet restore Simulation/Simulation.csproj Tests/Tests.csproj
+        run: |
+          dotnet restore Simulation/Simulation.csproj
+          dotnet restore Tests/Tests.csproj
 
       - name: Build (Release)
-        run: dotnet build Simulation/Simulation.csproj Tests/Tests.csproj --no-restore --configuration Release
+        run: |
+          dotnet build Simulation/Simulation.csproj --no-restore --configuration Release
+          dotnet build Tests/Tests.csproj --no-restore --configuration Release
 
       - name: Test (Release)
         run: dotnet test Tests/Tests.csproj --no-build --configuration Release --verbosity normal
