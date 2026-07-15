@@ -43,3 +43,30 @@
   le rendu réel à l'écran, le zoom/pan en main, l'absence de
   scintillement pixel art — pas de binaire Godot en CLI sur cette
   machine pour un test headless, à confirmer via F5.
+
+## Session 4 — Commandes + feu
+- Fait : ICommand + SpawnFire(x,y,radius) dans /Simulation. World gère
+  désormais le feu en double buffer (_activeCurrent/_activeNext, des
+  List<int> pour un ordre d'itération reproductible), propagation aux 4
+  voisines avec chance 0.5 tirée du même Rng seedé que la génération de
+  terrain (déterminisme bout en bout), une tuile en feu devient cendre
+  après exactement un tick. Ajout du terrain "ash" dans terrain.json
+  (walkable, non flammable). Nouveaux accesseurs World.SetTerrainId
+  (seam de test indépendant du bruit de Perlin) et World.IsBurning.
+  WorldRenderer tick la simulation à 30 Hz via un accumulateur à pas
+  fixe, redessine toute l'image à chaque tick (pas de dirty-tracking,
+  reporté comme prévu), réutilise la même Image/ImageTexture via
+  Update() plutôt que d'en recréer à chaque frame. Clic gauche →
+  GetGlobalMousePosition() → SpawnFire(rayon 3), sans calcul de caméra
+  à la main. 8 tests verts (4 précédents + 4 nouveaux sur la
+  propagation, l'arrêt à l'eau, la transformation en cendre, le
+  déterminisme multi-instances).
+- Cassé : rien de connu côté build/tests. Point de vigilance réel :
+  262 144 SetPixel par tick à 30 Hz en continu (feu actif ou non) —
+  si c'est perceptiblement lent en jeu, la solution est le
+  dirty-tracking déjà identifié et reporté.
+- Prochaine fois : v0.2 — agents (spawn, errance, faim, mort,
+  reproduction régulée par capacité de charge). Non vérifié par moi :
+  le rendu du feu à l'écran (couleur orange, disparition en cendre),
+  le ressenti de fluidité à 30 Hz, la conversion clic→tuile en jeu réel
+  avec zoom/pan — à confirmer via F5.
