@@ -27,6 +27,19 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   fixe. Jamais un dt qui grandit. Rendu une seule fois par frame quel
   que soit N.
 
+### Confirmé pour plus tard (inspiré de demandes communautaires WorldBox)
+- Formes de gouvernement = profils de poids d'utility AI (personalities.json),
+  pas un système séparé. Ex: "démocratique" = poids faible sur agressivité
+  solo du dirigeant, poids fort sur consensus/stabilité.
+- Historique affiché des civs éteintes (durée de vie, cause de chute) :
+  dérivé des ticks de naissance/mort déjà prévus pour la généalogie.
+- Traités de paix : une action de plus dans le scoring utility AI,
+  symétrique à declareWar.
+- Bâtiment capitale : simple valeur HP plus élevée dans buildings.json,
+  aucun système nouveau.
+- Capture/assimilation après conquête (alternative à l'élimination pure) :
+  à trancher au moment de la session guerre, pas maintenant.
+
 ### Non-objectifs confirmés
 - Contrôle direct d'une unité/meute par le joueur. Le joueur est un
   spectateur qui perturbe (pouvoirs), jamais un avatar.
