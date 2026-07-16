@@ -57,6 +57,21 @@ public sealed class World
     private int _tickCounter;
     private uint _nextAgentId;
 
+    // --- Diagnostic de mort (session 12) : compteurs cumulés, jamais
+    // lus par une décision, exclus de Hash() comme MealsEaten/DeathCause. ---
+    // Bornes de buckets : le seuil 33 correspond exactement à _boxSide
+    // (portée du BFS de recherche de nourriture), pour lire d'un coup
+    // d'œil si les morts sont dans ou hors de portée.
+    private static readonly double[] DeathDistanceBucketBounds = { 5, 10, 15, 20, 25, 33, 50, 100, 200 };
+    private readonly int[] _deathDistanceHistogram = new int[DeathDistanceBucketBounds.Length + 1];
+    private readonly int[] _deathTerrainHistogram = new int[256];
+    private long _deathFailureStreakSum;
+    private long _deathTicksIdleSum;
+    private long _deathTicksMovingSum;
+    private long _deathTicksSeekingSum;
+    private long _deathTicksEatingSum;
+    private long _deathHungerAtLastMealSum;
+
     private List<int> _activeCurrent = new();
     private List<int> _activeNext = new();
 
@@ -87,6 +102,30 @@ public sealed class World
     public int TilesBurnedCumulative { get; private set; }
 
     public int VegetationLostToFire { get; private set; }
+
+    public static IReadOnlyList<double> DeathDistanceBucketUpperBounds => DeathDistanceBucketBounds;
+
+    public int[] GetDeathDistanceHistogram() => (int[])_deathDistanceHistogram.Clone();
+
+    public int[] GetDeathTerrainHistogram() => (int[])_deathTerrainHistogram.Clone();
+
+    public double AverageDeathFailureStreak => AverageOverDeaths(_deathFailureStreakSum);
+
+    public double AverageDeathTicksIdle => AverageOverDeaths(_deathTicksIdleSum);
+
+    public double AverageDeathTicksMoving => AverageOverDeaths(_deathTicksMovingSum);
+
+    public double AverageDeathTicksSeeking => AverageOverDeaths(_deathTicksSeekingSum);
+
+    public double AverageDeathTicksEating => AverageOverDeaths(_deathTicksEatingSum);
+
+    public double AverageDeathHungerAtLastMeal => AverageOverDeaths(_deathHungerAtLastMealSum);
+
+    private double AverageOverDeaths(long sum)
+    {
+        int deaths = GetDeathCount(DeathCause.Hunger);
+        return deaths > 0 ? sum / (double)deaths : 0.0;
+    }
 
     public World(int seed, int size, TerrainCatalog catalog, VegetationCatalog vegetationCatalog, SimulationConfig config)
     {
@@ -463,6 +502,14 @@ public sealed class World
                 continue;
             }
 
+            switch (agent.State)
+            {
+                case AgentState.Idle: agent.TicksIdle++; break;
+                case AgentState.Moving: agent.TicksMoving++; break;
+                case AgentState.Seeking: agent.TicksSeeking++; break;
+                case AgentState.Eating: agent.TicksEating++; break;
+            }
+
             if ((agent.Id & 3) == group)
             {
                 ThinkAgent(ref agent, i);
@@ -509,17 +556,21 @@ public sealed class World
                     {
                         agent.State = AgentState.Eating;
                         agent.SeekCooldown = 0;
+                        agent.SearchFailureStreak = 0;
+                        agent.HungerAtLastMealStart = agent.Hunger;
                     }
                     else
                     {
                         SetWaypoint(ref agent, path[^1]);
                         path.RemoveAt(path.Count - 1);
                         agent.State = AgentState.Seeking;
+                        agent.SearchFailureStreak = 0;
                     }
                     return;
                 }
 
                 agent.SeekCooldown = _config.SeekFailureCooldownThinkTicks;
+                agent.SearchFailureStreak++;
             }
         }
 
@@ -581,6 +632,7 @@ public sealed class World
             bush.Stage >= _vegetationCatalog.Get(_bushTypeId).MatureStage)
         {
             agent.State = AgentState.Eating;
+            agent.HungerAtLastMealStart = agent.Hunger;
             MealsEaten++;
         }
         else
@@ -755,6 +807,72 @@ public sealed class World
         }
     }
 
+    // Diagnostic de mort (session 12) : appelé UNIQUEMENT à la mort d'un
+    // agent (rare relativement au nombre de ticks), jamais dans le
+    // chemin chaud. Capture avant que CleanupDeadAgents n'écrase le
+    // slot par swap-with-last.
+    private void RecordDeathDiagnostics(ref Agent agent)
+    {
+        int tileX = (int)MathF.Floor(agent.X);
+        int tileY = (int)MathF.Floor(agent.Y);
+        tileX = Math.Clamp(tileX, 0, Size - 1);
+        tileY = Math.Clamp(tileY, 0, Size - 1);
+
+        double distance = FindNearestMatureBushDistanceUnbounded(tileX, tileY);
+        _deathDistanceHistogram[DistanceBucket(distance)]++;
+
+        byte terrainId = _terrain[tileY * Size + tileX];
+        _deathTerrainHistogram[terrainId]++;
+
+        _deathFailureStreakSum += agent.SearchFailureStreak;
+        _deathTicksIdleSum += agent.TicksIdle;
+        _deathTicksMovingSum += agent.TicksMoving;
+        _deathTicksSeekingSum += agent.TicksSeeking;
+        _deathTicksEatingSum += agent.TicksEating;
+        _deathHungerAtLastMealSum += agent.HungerAtLastMealStart;
+    }
+
+    private static int DistanceBucket(double distance)
+    {
+        for (int i = 0; i < DeathDistanceBucketBounds.Length; i++)
+        {
+            if (distance < DeathDistanceBucketBounds[i])
+            {
+                return i;
+            }
+        }
+        return DeathDistanceBucketBounds.Length;
+    }
+
+    // Distance euclidienne au buisson mûr le plus proche, SANS la limite
+    // de portée du BFS de gameplay (_maxSearchRadius) : balaie tout
+    // _vegetation[0..VegetationCount), la "vraie" distance pour le
+    // diagnostic. double.PositiveInfinity si aucun buisson mûr n'existe.
+    private double FindNearestMatureBushDistanceUnbounded(int x, int y)
+    {
+        int matureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
+        double best = double.PositiveInfinity;
+
+        for (int i = 0; i < VegetationCount; i++)
+        {
+            ref Vegetation veg = ref _vegetation[i];
+            if (veg.Type != _bushTypeId || veg.Stage < matureStage)
+            {
+                continue;
+            }
+
+            double dx = veg.X - x;
+            double dy = veg.Y - y;
+            double distance = Math.Sqrt(dx * dx + dy * dy);
+            if (distance < best)
+            {
+                best = distance;
+            }
+        }
+
+        return best;
+    }
+
     private void CleanupDeadAgents()
     {
         int aliveCount = AliveCount;
@@ -764,6 +882,7 @@ public sealed class World
             if (_agents[i].State == AgentState.Dead)
             {
                 _deathsByCause[(byte)DeathCause.Hunger]++;
+                RecordDeathDiagnostics(ref _agents[i]);
 
                 aliveCount--;
                 _agents[i] = _agents[aliveCount];
@@ -814,6 +933,12 @@ public sealed class World
                 Hunger = 0,
                 Facing = 0,
                 SeekCooldown = 0,
+                SearchFailureStreak = 0,
+                TicksIdle = 0,
+                TicksMoving = 0,
+                TicksSeeking = 0,
+                TicksEating = 0,
+                HungerAtLastMealStart = 0,
             };
             spawned++;
         }

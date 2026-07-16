@@ -139,6 +139,24 @@ for (int i = 0; i < world.VegetationCount; i++)
 
 Console.WriteLine($"Vegetation par quadrant (fin de run): HG={quadrants[0]} HD={quadrants[1]} BG={quadrants[2]} BD={quadrants[3]}");
 
+// Herbe par quadrant (etape 3, session 12) : balayage complet des
+// tuiles, une seule fois en fin de rapport -- pas dans le tick.
+terrainCatalog.TryGetId("grass", out byte grassTerrainId);
+int[] grassQuadrants = new int[4];
+for (int y = 0; y < size; y++)
+{
+    for (int x = 0; x < size; x++)
+    {
+        if (world.GetTerrainId(x, y) == grassTerrainId)
+        {
+            int quadrant = (x < half ? 0 : 1) + (y < half ? 0 : 2);
+            grassQuadrants[quadrant]++;
+        }
+    }
+}
+
+Console.WriteLine($"Herbe par quadrant (fin de run):       HG={grassQuadrants[0]} HD={grassQuadrants[1]} BG={grassQuadrants[2]} BD={grassQuadrants[3]}");
+
 Console.WriteLine();
 Console.WriteLine($"Repas cumules: {world.MealsEaten}");
 Console.WriteLine("Morts par cause:");
@@ -146,6 +164,63 @@ Console.WriteLine($"  Faim: {world.GetDeathCount(DeathCause.Hunger)}");
 
 Console.WriteLine();
 Console.WriteLine($"Feu: {world.TilesBurnedCumulative} tuiles brulees (cumule), {world.VegetationLostToFire} vegetation perdue au feu");
+
+int totalHungerDeaths = world.GetDeathCount(DeathCause.Hunger);
+if (totalHungerDeaths > 0)
+{
+    Console.WriteLine();
+    Console.WriteLine("--- Autopsie (morts de faim) ---");
+
+    int[] distanceHistogram = world.GetDeathDistanceHistogram();
+    var bounds = World.DeathDistanceBucketUpperBounds;
+    Console.WriteLine("Distance au buisson mur le plus proche (recherche globale, pas bornee au BFS) :");
+    for (int b = 0; b < distanceHistogram.Length; b++)
+    {
+        string label = b == 0
+            ? $"  [0, {bounds[0]})"
+            : b < bounds.Count
+                ? $"  [{bounds[b - 1]}, {bounds[b]})"
+                : $"  [{bounds[^1]}, inf)";
+        double pct = 100.0 * distanceHistogram[b] / totalHungerDeaths;
+        Console.WriteLine($"{label,14} : {distanceHistogram[b],6}  ({pct,5:F1}%)");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("Terrain sous les mourants :");
+    int[] terrainHistogram = world.GetDeathTerrainHistogram();
+    for (int t = 0; t < terrainHistogram.Length; t++)
+    {
+        if (terrainHistogram[t] == 0)
+        {
+            continue;
+        }
+        string name = $"id={t}";
+        try
+        {
+            name = terrainCatalog.Get((byte)t).Name;
+        }
+        catch (ArgumentException)
+        {
+            // id inconnu du catalogue (ne devrait pas arriver) : garde id=N.
+        }
+        double pct = 100.0 * terrainHistogram[t] / totalHungerDeaths;
+        Console.WriteLine($"  {name,-8} : {terrainHistogram[t],6}  ({pct,5:F1}%)");
+    }
+
+    Console.WriteLine();
+    double lifeTicks = world.AverageDeathTicksIdle + world.AverageDeathTicksMoving
+        + world.AverageDeathTicksSeeking + world.AverageDeathTicksEating;
+    Console.WriteLine($"Echecs de recherche consecutifs (moyenne avant la mort) : {world.AverageDeathFailureStreak:F1}");
+    Console.WriteLine($"Faim au dernier repas commence (moyenne)                : {world.AverageDeathHungerAtLastMeal:F1}");
+    if (lifeTicks > 0)
+    {
+        Console.WriteLine($"Repartition du temps de vie (moyenne) : " +
+            $"Idle={100.0 * world.AverageDeathTicksIdle / lifeTicks:F1}% " +
+            $"Moving={100.0 * world.AverageDeathTicksMoving / lifeTicks:F1}% " +
+            $"Seeking={100.0 * world.AverageDeathTicksSeeking / lifeTicks:F1}% " +
+            $"Eating={100.0 * world.AverageDeathTicksEating / lifeTicks:F1}%");
+    }
+}
 
 Console.WriteLine();
 Console.WriteLine($"Hash final: 0x{world.Hash():X16}");

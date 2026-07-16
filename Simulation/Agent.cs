@@ -36,4 +36,14 @@ public struct Agent
     // Ticks de réflexion à attendre avant de retenter une recherche de
     // nourriture après un échec (cf. cooldown de famine, session 10).
     public byte SeekCooldown;
+
+    // --- Diagnostic (session 12) ---
+    // Écrits uniquement, jamais lus par une décision : n'influencent
+    // jamais le comportement, donc exclus de World.Hash().
+    public uint SearchFailureStreak;
+    public uint TicksIdle;
+    public uint TicksMoving;
+    public uint TicksSeeking;
+    public uint TicksEating;
+    public byte HungerAtLastMealStart;
 }

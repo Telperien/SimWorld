@@ -380,3 +380,28 @@
   ash→grass de la session 10 tourne enfin en conditions réelles). Non
   vérifié par moi : rendu réel des arbres qui meurent/disparaissent
   visiblement — à confirmer via F5.
+
+## Session 12 — Diagnostic : pourquoi les agents meurent de faim entourés de nourriture
+- Fait : instrumentation pure (aucun fix). Autopsie de mort ajoutée
+  (distance globale au buisson mûr le plus proche, terrain, échecs de
+  recherche, répartition Idle/Moving/Seeking/Eating, faim au dernier
+  repas commencé) — champs diagnostiques sur Agent, histogrammes/sommes
+  sur World, tous exclus de Hash(). 2M ticks, seed 42 + seed 7 : 93-95%
+  des morts de faim ont un buisson mûr <33 tuiles (portée BFS) au
+  moment de la mort → budget énergétique, pas désert spatial. Cause
+  arithmétique identifiée : l'incrément de faim (World.cs:528) tourne
+  sans condition à chaque tick de pensée, y compris pendant le
+  SeekCooldown — 8,1-8,2 échecs consécutifs en moyenne × 11 points
+  (10 ticks de cooldown + 1 de recherche) ≈ 90 points brûlés, soit 86%
+  de la marge (150→255) rien que dans la boucle échec-attente. Bonus
+  (étape 3) : la dérive spatiale de la végétation (test qui passe à
+  court terme) ne suit PAS la répartition de l'herbe sur les deux
+  seeds — vraie dérive de repousse, direction différente par seed
+  (dynamique auto-amplifiante, pas un biais directionnel fixe).
+- Cassé : rien. 31/31 tests verts, golden-hash inchangé (confirmé, pas
+  supposé) — l'instrumentation n'a aucune influence comportementale.
+- Prochaine fois (session 13, décidé ensemble) : fix du cooldown de
+  faim (geler l'accumulation pendant l'attente, ou réduire son coût)
+  + séparation arbres/buissons en deux tableaux (option B session 11,
+  le cliquet des arbres est inversé mais pas cassé — cause racine :
+  tableau partagé à capacité fixe).
