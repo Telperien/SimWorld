@@ -105,13 +105,13 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   (interactions spatiales réelles) pour produire de l'émergence
   perçue. Ne jamais compter sur le canal 1 pour ça.
 
-### À vérifier / trancher : réservation de ressource
-- Actuellement : à confirmer si deux agents peuvent cibler le même
-  buisson simultanément (premier arrivé le vide sous le nez du second)
-  ou si un mécanisme de réservation existe déjà. Décider consciemment
-  lors d'une prochaine session touchant à Seeking/Eating — les deux
-  sont des designs valides mais changent la nature de la compétition
-  entre agents.
+### Réservation de ressource — TRANCHÉ (2026-07-16)
+- État constaté dans le code : aucun mécanisme de réservation, deux
+  agents peuvent cibler le même buisson (le premier arrivé le vide,
+  le second re-vérifie à l'arrivée et repasse Idle).
+- Décision : la réservation de cible est le design retenu — voir la
+  section "Récolte — réservation de cible". À implémenter lors d'une
+  prochaine session touchant à Seeking/Eating.
 
 ### Chaos volontaire (piste future, non urgente)
 - Possible feature "comparaison de timelines" : lancer deux World au
@@ -140,6 +140,32 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - La struct Agent porte MotherId, FatherId et Tracked dès sa première version.
 - Généalogie conservée à vie uniquement pour les castes tracked ;
   les anonymes partent dans un ring buffer borné.
+
+## Ressources — pool commun, zéro logistique
+
+- Aucun inventaire individuel, aucun transport, aucun rôle "porteur".
+  Une ressource récoltée est ajoutée DIRECTEMENT au pool de la civ au
+  fil de la récolte (mesuré sur plusieurs ticks, jamais un transfert
+  instantané en un seul tick). Une ressource consommée (construction,
+  nourriture une fois les civs formalisées) est déduite DIRECTEMENT
+  du même pool.
+- Un seul pool par civ. Jamais de stock localisé par village/bâtiment,
+  jamais de caravane, jamais de route commerciale (cohérent avec la
+  règle "pas de commerce" déjà posée).
+- S'applique dès l'implémentation des matériaux (bois/pierre) et,
+  plus tard, à la nourriture une fois que les civs existent et que la
+  capacité de charge est calculée au niveau civ plutôt qu'individuel.
+- Avant l'existence des civs : le comportement actuel (un agent
+  mange directement un buisson, Hunger individuel) reste inchangé —
+  il n'y a pas encore de pool à qui appartenir.
+
+## Récolte — réservation de cible
+
+- Un agent qui cible un buisson/gisement pour récolte le RÉSERVE :
+  un autre agent en recherche ne doit pas converger vers la même
+  cible pendant qu'elle est déjà visée. Évite la compétition
+  absurde sur une même ressource et la disparition surprise d'une
+  cible sous le nez d'un agent qui s'en approchait.
 
 ## IA
 - Agents = FSM (byte) + A* court. JAMAIS de behavior tree, jamais de GOAP.
