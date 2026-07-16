@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Simulation;
 
-public sealed class SimulationConfig
+public sealed record SimulationConfig
 {
     public required double FireSpreadChance { get; init; }
     public required double AgentDensity { get; init; }
@@ -18,6 +18,10 @@ public sealed class SimulationConfig
     public required double TerrainWaterThreshold { get; init; }
     public required double TerrainSandThreshold { get; init; }
     public required double TerrainGrassThreshold { get; init; }
+    public required int HarvestAmountPerTick { get; init; }
+    public required int VegetationRegrowthDelayTicks { get; init; }
+    public required double AshToGrassChance { get; init; }
+    public required byte SeekFailureCooldownThinkTicks { get; init; }
 
     public static SimulationConfig Load(string json)
     {

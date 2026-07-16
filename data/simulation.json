@@ -12,5 +12,9 @@
   "terrainFeaturesAcrossMap": 8.0,
   "terrainWaterThreshold": -0.1,
   "terrainSandThreshold": 0.0,
-  "terrainGrassThreshold": 0.5
+  "terrainGrassThreshold": 0.5,
+  "harvestAmountPerTick": 8,
+  "vegetationRegrowthDelayTicks": 900,
+  "ashToGrassChance": 0.02,
+  "seekFailureCooldownThinkTicks": 10
 }

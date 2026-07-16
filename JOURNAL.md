@@ -277,3 +277,49 @@
   population plate. Non vérifié par moi : rien de nouveau côté F5 cette
   session (aucun changement de gameplay), simulation.json chargé
   correctement par WorldRenderer à confirmer quand même à l'ouverture.
+
+## Session 10 — Santé du monde
+- Fait : nourriture par buisson enfin finie. Vegetation.FoodRemaining
+  (stock partagé, initialisé à FoodValue), récolte étalée sur plusieurs
+  ticks (HarvestAmountPerTick retire la même quantité au stock ET à la
+  faim de l'agent — récolter et se nourrir sont le même geste), le
+  buisson disparaît à 0 au lieu de redevenir jeune. Agent.EatingTimer
+  (précalculé) supprimé, devenu inutile. Repousse à délai
+  (_vegetationClearedTick, posé au même endroit pour épuisement ET feu
+  — un point unique) + biais spatial haut-gauche corrigé (point de
+  départ tournant tiré de _rngVegetation, balayage Size² à partir de ce
+  point avec modulo, toujours borné). Cendre → herbe (TickAshRecovery,
+  jet indépendant par tuile, pas de biais possible faute de capacité à
+  saturer). Cooldown de famine (Agent.SeekCooldown) : ThinkAgent
+  restructurée pour qu'un agent affamé en attente de cooldown tombe
+  dans le bloc d'errance commun au lieu de rester figé — c'est ce
+  correctif qui rend tout le reste observable. Matrice d'interaction
+  écrite avant codage (cf. plan) : confirmé qu'un buisson en cours de
+  récolte ne réagit pas au feu (flammable=false depuis la session 7,
+  vérifié en relisant le code) et que le fallback "cible disparue
+  pendant Seeking" (session 6) couvrait déjà la disparition par
+  épuisement sans modification. SimulationConfig passe de class à
+  record (support de l'expression `with`, utilisée par --scarcity et
+  les tests de rareté). SimReport : buissons jeunes/mûrs séparés,
+  répartition par quadrant, distribution des états d'agents, compteur
+  cumulé de repas, flag --scarcity (agentDensity ×4, vegetationDensity
+  ÷10 — vérifié empiriquement que ça tue vraiment, pas cosmétique).
+  27 tests verts (21 précédents + 6 nouveaux : buisson qui disparaît,
+  repousse non instantanée, répartition équilibrée par quadrant,
+  cendre qui récupère, agent qui erre au lieu de geler, morts réelles
+  en scénario de rareté).
+  **Golden-hash recalculé** (comportement changé légitimement, comme
+  attendu) : 1527739277831296971 → 8812310094165850180.
+- Cassé : rien de connu, build + tests verts sur les 4 projets.
+- Prochaine fois : reproduction régulée par la capacité de charge —
+  la nourriture finie + la repousse à délai donnent enfin un vrai
+  signal de pression à réguler dessus. SimReport (seed 42, 50k ticks) :
+  scénario normal — population 199→186 (13 morts, contre 0 en session
+  9), buissons mûrs déclinent lentement face aux arbres qui grignotent
+  les emplacements libérés (aucune mort d'arbre sans feu), quadrants
+  équilibrés (2989-3494, plus de biais systématique), 14184 repas
+  cumulés. Scénario --scarcity — extinction totale (786→0, 786 morts
+  de faim) : la rareté demandée n'est pas cosmétique. Non vérifié par
+  moi : rendu réel (buissons qui apparaissent/disparaissent
+  visiblement, cendre qui repousse en herbe, agents qui errent au lieu
+  de geler) — à confirmer via F5.

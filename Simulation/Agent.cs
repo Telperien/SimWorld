@@ -29,8 +29,11 @@ public struct Agent
     public AgentState State;
     public byte Species;
     public byte Hunger;
-    public byte EatingTimer;
 
     // 0 = droite, 1 = gauche.
     public byte Facing;
+
+    // Ticks de réflexion à attendre avant de retenter une recherche de
+    // nourriture après un échec (cf. cooldown de famine, session 10).
+    public byte SeekCooldown;
 }

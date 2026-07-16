@@ -193,6 +193,53 @@ public class AgentTests
     }
 
     [Fact]
+    public void Agent_DoesNotFreeze_WhenNoFoodReachable()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 90, size: 64, catalog, vegetation, config);
+        MakeFoodless(world, catalog);
+
+        int seekTicks = TicksUntilHungerThreshold(config, config.HungerSeekThreshold);
+        int cooldownRealTicks = config.SeekFailureCooldownThinkTicks * 4;
+        int maxTicks = seekTicks + cooldownRealTicks + 100;
+
+        bool sawMoving = false;
+        for (int i = 0; i < maxTicks && !sawMoving; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+            for (int a = 0; a < world.AliveCount; a++)
+            {
+                if (world.GetAgent(a).State == AgentState.Moving)
+                {
+                    sawMoving = true;
+                    break;
+                }
+            }
+        }
+
+        Assert.True(sawMoving);
+    }
+
+    [Fact]
+    public void Agents_DieOfHunger_InScarcityScenario()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var baseConfig = LoadSimulationConfig();
+        var scarcityConfig = baseConfig with { AgentDensity = 0.003, VegetationDensity = 0.005 };
+        var world = new World(seed: 60, size: 128, catalog, vegetation, scarcityConfig);
+
+        for (int i = 0; i < 4000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        Assert.True(world.GetDeathCount(DeathCause.Hunger) > 0);
+    }
+
+    [Fact]
     public void Tick_StillAllocatesNothing()
     {
         var catalog = LoadCatalog();

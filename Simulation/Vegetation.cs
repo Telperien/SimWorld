@@ -6,4 +6,8 @@ public struct Vegetation
     public int Y;
     public byte Type;
     public byte Stage;
+
+    // Stock partagé restant (récoltable). Initialisé au FoodValue du
+    // type à la création ; atteint 0 => l'instance disparaît.
+    public int FoodRemaining;
 }

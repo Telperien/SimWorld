@@ -4,6 +4,7 @@ using Simulation;
 int seed = 42;
 int ticks = 1000;
 int size = 512;
+bool scarcity = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -18,13 +19,22 @@ for (int i = 0; i < args.Length; i++)
         case "--size":
             size = int.Parse(args[++i]);
             break;
+        case "--scarcity":
+            scarcity = true;
+            break;
     }
 }
 
 string basePath = AppContext.BaseDirectory;
 var terrainCatalog = TerrainCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "terrain.json")));
 var vegetationCatalog = VegetationCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "vegetation.json")));
-var config = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "data", "simulation.json")));
+var baseConfig = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "data", "simulation.json")));
+
+// Densite d'agents en hausse, capacite vegetale en forte baisse : force
+// un scenario de rareté reelle plutot qu'un ajustement cosmetique.
+var config = scarcity
+    ? baseConfig with { AgentDensity = 0.003, VegetationDensity = 0.005 }
+    : baseConfig;
 
 vegetationCatalog.TryGetId("bush", out byte bushType);
 vegetationCatalog.TryGetId("tree", out byte treeType);
@@ -36,14 +46,17 @@ if (world.AgentSpawnCapped)
     Console.WriteLine("ATTENTION: le spawn d'agents a atteint sa limite de tentatives (carte quasi sans tuiles walkable ?)");
 }
 
-var samples = new List<(int Tick, int Pop, int Bush, int Tree, int Grass, int Ash)>();
+var samples = new List<(int Tick, int Pop, int BushYoung, int BushMature, int Tree, int Grass, int Ash)>();
 
 void Sample(int tick)
 {
+    int bushMature = world.CountMatureVegetationOfType(bushType);
+    int bushTotal = world.CountVegetationOfType(bushType);
     samples.Add((
         tick,
         world.AliveCount,
-        world.CountVegetationOfType(bushType),
+        bushTotal - bushMature,
+        bushMature,
         world.CountVegetationOfType(treeType),
         world.GrassTileCount,
         world.AshTileCount));
@@ -66,16 +79,43 @@ for (int i = 0; i < ticks; i++)
 
 stopwatch.Stop();
 
-Console.WriteLine($"SimReport -- seed={seed} size={size} ticks={ticks}");
+Console.WriteLine($"SimReport -- seed={seed} size={size} ticks={ticks}{(scarcity ? " --scarcity" : "")}");
 Console.WriteLine($"Duree: {stopwatch.Elapsed.TotalSeconds:F2}s");
 Console.WriteLine();
-Console.WriteLine($"{"tick",8} {"pop",6} {"bush",6} {"tree",6} {"grass",8} {"ash",6}");
+Console.WriteLine($"{"tick",8} {"pop",6} {"bjeune",7} {"bmur",6} {"arbre",6} {"herbe",8} {"cendre",7}");
 foreach (var s in samples)
 {
-    Console.WriteLine($"{s.Tick,8} {s.Pop,6} {s.Bush,6} {s.Tree,6} {s.Grass,8} {s.Ash,6}");
+    Console.WriteLine($"{s.Tick,8} {s.Pop,6} {s.BushYoung,7} {s.BushMature,6} {s.Tree,6} {s.Grass,8} {s.Ash,7}");
+}
+
+int idle = 0, moving = 0, seeking = 0, eating = 0;
+for (int i = 0; i < world.AliveCount; i++)
+{
+    switch (world.GetAgent(i).State)
+    {
+        case AgentState.Idle: idle++; break;
+        case AgentState.Moving: moving++; break;
+        case AgentState.Seeking: seeking++; break;
+        case AgentState.Eating: eating++; break;
+    }
 }
 
 Console.WriteLine();
+Console.WriteLine($"Etats agents (fin de run): Idle={idle} Moving={moving} Seeking={seeking} Eating={eating}");
+
+int half = size / 2;
+int[] quadrants = new int[4];
+for (int i = 0; i < world.VegetationCount; i++)
+{
+    Vegetation veg = world.GetVegetation(i);
+    int quadrant = (veg.X < half ? 0 : 1) + (veg.Y < half ? 0 : 2);
+    quadrants[quadrant]++;
+}
+
+Console.WriteLine($"Vegetation par quadrant (fin de run): HG={quadrants[0]} HD={quadrants[1]} BG={quadrants[2]} BD={quadrants[3]}");
+
+Console.WriteLine();
+Console.WriteLine($"Repas cumules: {world.MealsEaten}");
 Console.WriteLine("Morts par cause:");
 Console.WriteLine($"  Faim: {world.GetDeathCount(DeathCause.Hunger)}");
 
