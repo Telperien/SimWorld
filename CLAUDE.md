@@ -3,6 +3,37 @@
 Simulateur de monde type WorldBox. Godot 4 (.NET) + C#. Windows/Linux.
 Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique.
 
+## Vision & non-objectifs
+
+### Objectifs centraux (non négociables)
+- Civs pleinement autonomes : exploration (via connaissance partielle par
+  civ), expansion, guerre, décidées par utility AI — jamais scriptées à la
+  main, jamais déclenchées par le joueur.
+- Toute décision de civ doit être explicable (Breakdown des scores),
+  visible par le joueur via un overlay/panneau. C'est ce qui doit dépasser
+  WorldBox : pas plus de systèmes, une meilleure lisibilité de ceux qui
+  existent.
+
+### Confirmé pour plus tard (pas maintenant, pas oublié)
+- Spawn manuel d'agents par le joueur (civilisés ou hostiles) : une
+  ICommand de plus, une fois civs + hostilité posées.
+- Sauvegarde/chargement de monde -> cartes pré-générées jouables. Dépend
+  du travail de sérialisation d'état déjà identifié (hash complet, RNG
+  par flux). Ne pas construire avant que Hash()/snapshot soit fiable.
+- Éditeur de carte (dessiner son terrain à la main) : outil UI séparé de
+  la simulation, écrit directement dans le tableau de terrain. Après les
+  bâtiments et les civs.
+- Vitesse de jeu variable (pause, x2, x3...) : N ticks par frame à dt
+  fixe. Jamais un dt qui grandit. Rendu une seule fois par frame quel
+  que soit N.
+
+### Non-objectifs confirmés
+- Contrôle direct d'une unité/meute par le joueur. Le joueur est un
+  spectateur qui perturbe (pouvoirs), jamais un avatar.
+- Bestiaire fantastique (dragons, zombies, démons, OVNIs) : pas notre
+  identité pour l'instant. Les "mobs hostiles" à venir sont des menaces
+  crédibles (prédateurs, raiders), pas du fantastique gratuit.
+
 ## Architecture — non négociable
 - /Simulation : C# pur. AUCUN `using Godot`. AUCUN `using System.IO`.
 - /Game (racine Godot) : référence /Simulation. Jamais l'inverse.
