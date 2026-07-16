@@ -184,3 +184,48 @@
   Non vérifié par moi : le sprite 3x3 et son flip à l'écran, les
   couleurs de végétation sur la carte, l'apparition/repousse visible des
   buissons, la disparition des arbres en feu — à confirmer via F5.
+
+## Session 8 — Fondations d'identité et de déterminisme
+- Fait : Agent.Id (uint, compteur monotone _nextAgentId) — identité
+  stable et permanente, distincte de la position dans le tableau.
+  MotherId/FatherId passent de int(-1) à uint(Agent.UnknownParent =
+  uint.MaxValue), toujours inutilisés avant la reproduction (session
+  10). Mise à jour étalée corrigée : (i & 3) → (agent.Id & 3), un agent
+  ne change plus de groupe de pensée quand la compaction déplace un
+  autre agent. Rng unique remplacé par 4 flux dérivés du seed principal
+  (_rngWorldGen/_rngFire/_rngAgents/_rngVegetation, via le même mélange
+  FNV que Hash()) — ajouter un tirage dans un système ne dérange plus
+  la trajectoire des autres. Tirage de direction d'errance corrigé :
+  NextUInt64() & 3 (bits faibles du xorshift) → NextUInt64() >> 62
+  (bits forts). Hash() étendu pour couvrir tout ce qui manquait :
+  _burning, _activeCurrent, _tickCounter, _nextAgentId, l'état des 4
+  Rng (nouvelle propriété Rng.State), _agentPaths, et les champs
+  d'agent qui n'étaient pas encore couverts (Id, MotherId, FatherId,
+  Tracked, Species, Facing). Les buffers de travail de la recherche BFS
+  restent exclus de Hash() (documenté en commentaire + CLAUDE.md :
+  entièrement écrasés à chaque appel, n'influencent jamais le futur).
+  Golden-hash test ajouté (seed+taille fixes, feu+agents+végétation sur
+  5000 ticks, hash committé en dur). CLAUDE.md : interdiction de
+  MathF.Sin/Cos/Pow/Exp dans /Simulation (non garantis cross-plateforme,
+  seuls +,-,*,/,Sqrt,Floor autorisés — déjà respecté, vérifié par grep) ;
+  règle Id-jamais-index formalisée. 21 tests verts (19 précédents + Id
+  qui survit à plusieurs morts/compactions + golden-hash).
+  Sur les "morts groupées" (hypothèse notée en session 6/7, à vérifier
+  cette session) : le fix de l'étalement par Id NE change PAS le
+  comportement du test d'extinction (toujours vert avec les mêmes
+  comptes de ticks) — confirme l'analyse du plan : dans ce scénario
+  aucun agent ne meurt avant l'instant synchronisé final, donc aucune
+  compaction ne se produit avant pour perturber les groupes de pensée.
+  La cause réelle reste l'incrément de faim fixe sans aucune variance.
+  Le bug d'étalement par index était réel et valait la peine d'être
+  corrigé (il aurait causé une dérive dans un scénario à morts
+  échelonnées), mais ce n'était pas la cause de ce phénomène précis.
+- Cassé : rien de connu, build + tests verts partout (Simulation, Tests,
+  WorldSim). Aucun script Godot ne lit MotherId/FatherId/Id, donc aucun
+  changement côté /scripts.
+- Prochaine fois : reproduction régulée par la capacité de charge
+  (session 10 selon le découpage donné), castes/traits, SimReport. Point
+  d'attention pour la suite : je ne peux pas exécuter la CI Linux
+  moi-même — si le golden-hash test passe en local (Windows) et échoue
+  en CI après un push, ce sera une vraie divergence flottante
+  cross-plateforme à investiguer, pas un test à neutraliser.

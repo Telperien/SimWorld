@@ -14,6 +14,9 @@ public sealed class Rng
         _state = seed == 0 ? 0x9E3779B97F4A7C15UL : seed;
     }
 
+    // Lecture seule : sert à couvrir l'état du flux dans World.Hash().
+    public ulong State => _state;
+
     public ulong NextUInt64()
     {
         ulong x = _state;

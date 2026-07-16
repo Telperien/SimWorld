@@ -16,6 +16,13 @@ public sealed class World
     private const int MaxSearchRadius = 16;
     private const int BoxSide = MaxSearchRadius * 2 + 1;
 
+    // Identifiants arbitraires mais fixes pour dériver un seed par flux
+    // depuis le seed principal (cf. DeriveSeed).
+    private const ulong WorldGenStreamId = 1;
+    private const ulong FireStreamId = 2;
+    private const ulong AgentsStreamId = 3;
+    private const ulong VegetationStreamId = 4;
+
     private readonly byte[] _terrain;
     private readonly bool[] _burning;
     private readonly Agent[] _agents;
@@ -24,16 +31,23 @@ public sealed class World
     private readonly int[] _vegetationIndexAt;
     private readonly TerrainCatalog _catalog;
     private readonly VegetationCatalog _vegetationCatalog;
-    private readonly Rng _rng;
+    private readonly Rng _rngWorldGen;
+    private readonly Rng _rngFire;
+    private readonly Rng _rngAgents;
+    private readonly Rng _rngVegetation;
     private readonly byte _ashId;
     private readonly byte _grassId;
     private readonly byte _bushTypeId;
     private readonly byte _treeTypeId;
     private int _tickCounter;
+    private uint _nextAgentId;
 
     private List<int> _activeCurrent = new();
     private List<int> _activeNext = new();
 
+    // Buffers de travail pour la recherche BFS : entièrement écrasés (via
+    // generation-stamp) à chaque appel, jamais lus entre deux appels.
+    // Exclus de Hash() volontairement (cf. CLAUDE.md, Déterminisme).
     private readonly int[] _searchGeneration = new int[BoxSide * BoxSide];
     private readonly int[] _searchCameFrom = new int[BoxSide * BoxSide];
     private readonly List<int> _searchQueue = new();
@@ -59,7 +73,11 @@ public sealed class World
         _vegetationCatalog = vegetationCatalog;
         _terrain = new byte[size * size];
         _burning = new bool[size * size];
-        _rng = new Rng((ulong)seed);
+
+        _rngWorldGen = new Rng(DeriveSeed(seed, WorldGenStreamId));
+        _rngFire = new Rng(DeriveSeed(seed, FireStreamId));
+        _rngAgents = new Rng(DeriveSeed(seed, AgentsStreamId));
+        _rngVegetation = new Rng(DeriveSeed(seed, VegetationStreamId));
 
         if (!catalog.TryGetId("ash", out _ashId))
         {
@@ -181,18 +199,49 @@ public sealed class World
             Mix(ref hash, b);
         }
 
+        foreach (bool burning in _burning)
+        {
+            Mix(ref hash, burning ? 1UL : 0UL);
+        }
+
+        Mix(ref hash, (ulong)_tickCounter);
+        Mix(ref hash, _nextAgentId);
+        Mix(ref hash, _rngWorldGen.State);
+        Mix(ref hash, _rngFire.State);
+        Mix(ref hash, _rngAgents.State);
+        Mix(ref hash, _rngVegetation.State);
+
+        Mix(ref hash, (ulong)_activeCurrent.Count);
+        foreach (int index in _activeCurrent)
+        {
+            Mix(ref hash, (uint)index);
+        }
+
         Mix(ref hash, (ulong)AliveCount);
 
         for (int i = 0; i < AliveCount; i++)
         {
             ref Agent agent = ref _agents[i];
+            Mix(ref hash, agent.Id);
             Mix(ref hash, BitConverter.SingleToUInt32Bits(agent.X));
             Mix(ref hash, BitConverter.SingleToUInt32Bits(agent.Y));
             Mix(ref hash, (uint)agent.TargetX);
             Mix(ref hash, (uint)agent.TargetY);
+            Mix(ref hash, agent.MotherId);
+            Mix(ref hash, agent.FatherId);
+            Mix(ref hash, agent.Tracked ? 1UL : 0UL);
             Mix(ref hash, (byte)agent.State);
+            Mix(ref hash, agent.Species);
             Mix(ref hash, agent.Hunger);
             Mix(ref hash, agent.EatingTimer);
+            Mix(ref hash, agent.Facing);
+
+            List<int> path = _agentPaths[i];
+            Mix(ref hash, (ulong)path.Count);
+            foreach (int waypoint in path)
+            {
+                Mix(ref hash, (uint)waypoint);
+            }
         }
 
         Mix(ref hash, (ulong)VegetationCount);
@@ -213,6 +262,13 @@ public sealed class World
     {
         hash ^= value;
         hash *= FnvPrime;
+    }
+
+    private static ulong DeriveSeed(int seed, ulong streamId)
+    {
+        ulong derived = (ulong)seed;
+        Mix(ref derived, streamId);
+        return derived;
     }
 
     private void TickFire()
@@ -251,7 +307,7 @@ public sealed class World
             return;
         }
 
-        if (_rng.NextDouble() >= SpreadChance)
+        if (_rngFire.NextDouble() >= SpreadChance)
         {
             return;
         }
@@ -291,7 +347,7 @@ public sealed class World
                 continue;
             }
 
-            if ((i & 3) == group)
+            if ((agent.Id & 3) == group)
             {
                 ThinkAgent(ref agent, i);
                 if (agent.State == AgentState.Dead)
@@ -342,7 +398,7 @@ public sealed class World
             return;
         }
 
-        if (agent.State == AgentState.Idle && _rng.NextDouble() < IdleMoveChance)
+        if (agent.State == AgentState.Idle && _rngAgents.NextDouble() < IdleMoveChance)
         {
             TryStartMoving(ref agent);
         }
@@ -443,7 +499,7 @@ public sealed class World
         int currentX = (int)MathF.Floor(agent.X);
         int currentY = (int)MathF.Floor(agent.Y);
 
-        int direction = (int)(_rng.NextUInt64() & 3);
+        int direction = (int)(_rngAgents.NextUInt64() >> 62);
         int dx = direction == 0 ? -1 : direction == 1 ? 1 : 0;
         int dy = direction == 2 ? -1 : direction == 3 ? 1 : 0;
 
@@ -584,8 +640,8 @@ public sealed class World
         int spawned = 0;
         while (spawned < _agents.Length)
         {
-            int x = (int)(_rng.NextDouble() * Size);
-            int y = (int)(_rng.NextDouble() * Size);
+            int x = (int)(_rngWorldGen.NextDouble() * Size);
+            int y = (int)(_rngWorldGen.NextDouble() * Size);
 
             if (!_catalog.Get(_terrain[y * Size + x]).Walkable)
             {
@@ -594,12 +650,13 @@ public sealed class World
 
             _agents[spawned] = new Agent
             {
+                Id = _nextAgentId++,
                 X = x + 0.5f,
                 Y = y + 0.5f,
                 TargetX = x,
                 TargetY = y,
-                MotherId = -1,
-                FatherId = -1,
+                MotherId = Agent.UnknownParent,
+                FatherId = Agent.UnknownParent,
                 Tracked = false,
                 State = AgentState.Idle,
                 Species = 0,
@@ -669,11 +726,11 @@ public sealed class World
                     continue;
                 }
 
-                if (_rng.NextDouble() < bushChance)
+                if (_rngVegetation.NextDouble() < bushChance)
                 {
                     SpawnVegetation(x, y, _bushTypeId);
                 }
-                else if (_rng.NextDouble() < treeChance)
+                else if (_rngVegetation.NextDouble() < treeChance)
                 {
                     SpawnVegetation(x, y, _treeTypeId);
                 }
@@ -683,7 +740,7 @@ public sealed class World
 
     private void GenerateTerrain()
     {
-        var noise = new PerlinNoise(_rng);
+        var noise = new PerlinNoise(_rngWorldGen);
 
         if (!_catalog.TryGetId("water", out byte water) ||
             !_catalog.TryGetId("sand", out byte sand) ||

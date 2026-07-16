@@ -11,12 +11,20 @@ public enum AgentState : byte
 
 public struct Agent
 {
+    // Parent inconnu. Jamais un index : les tableaux d'agents sont
+    // compactés par swap-with-last, seul Id survit à une compaction.
+    public const uint UnknownParent = uint.MaxValue;
+
+    // Identité stable et permanente, distincte de la position dans le
+    // tableau (qui change à chaque mort via CleanupDeadAgents).
+    public uint Id;
+
     public float X;
     public float Y;
     public int TargetX;
     public int TargetY;
-    public int MotherId;
-    public int FatherId;
+    public uint MotherId;
+    public uint FatherId;
     public bool Tracked;
     public AgentState State;
     public byte Species;

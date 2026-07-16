@@ -25,6 +25,10 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - /Game (racine Godot) : référence /Simulation. Jamais l'inverse.
 - /Tests : xUnit, référence /Simulation uniquement.
 - Le jeu, c'est /Simulation. Godot n'est qu'un afficheur remplaçable.
+- Toute référence persistante à une entité utilise un Id stable, JAMAIS
+  un index de tableau : tous les tableaux d'entités sont compactés par
+  swap-with-last. Vaut pour les agents, et pour toute entité future
+  (végétation, bâtiments, civs).
 
 ## Boucle de simulation
 - ZÉRO allocation dans le tick. Pas de LINQ, pas de new, pas de lambda capturante.
@@ -47,6 +51,9 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   en .NET → divergence silencieuse. Tableaux ou ordre trié uniquement.
 - Requêtes spatiales (voisinage, choix de partenaire) : parcours en ordre
   stable (index croissant), jamais dépendant de l'ordre d'insertion.
+- JAMAIS MathF.Sin/Cos/Pow/Exp dans /Simulation : implémentations non
+  garanties identiques cross-plateforme (x86/ARM/WASM). Uniquement
+  +,-,*,/,Sqrt,Floor ou des approximations maison.
 
 ### Sauvegarde (prépare, ne construis pas encore)
 - Tout nouvel état ajouté à World (civs, territoire, castes...) DOIT
