@@ -78,6 +78,48 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - La sauvegarde réelle (sérialisation complète, format de fichier)
   n'est construite qu'après la session 17 (civs stables), pas avant.
 
+## Déterminisme — granularité et causalité (clarifié le 2026-07-16)
+
+### RNG — flux par système, pas par entité
+- Flux par SYSTÈME (_rngAgents, _rngFire, _rngVegetation, _rngWorldGen),
+  pas un flux par entité individuelle.
+- Conséquence ASSUMÉE, pas un bug : ajouter/retirer une entité en cours
+  de partie décale tous les tirages futurs de CE flux, pour toutes les
+  entités qui l'utilisent — pas seulement les voisines de l'entité
+  modifiée. C'est un effet de bord numérique global, immédiat, mais
+  souvent invisible (un tirage décalé ne franchit pas forcément un
+  seuil de décision).
+- À ne pas confondre avec la causalité réelle ci-dessous.
+
+### Deux canaux de causalité distincts
+1. RNG partagé (ci-dessus) : artefact d'implémentation, sans
+   signification narrative. Divergence numérique immédiate et globale,
+   mais souvent sans effet visible.
+2. Compétition réelle pour des ressources localisées (nourriture,
+   territoire, matériaux) : la VRAIE source d'émergence intéressante.
+   Se propage de proche en proche via la grille spatiale (portée de
+   recherche bornée), pas d'un coup partout. C'est ce canal qui doit
+   produire l'essentiel de ce que le joueur perçoit comme "un monde
+   vivant qui réagit" — le RNG partagé n'est que du bruit superposé.
+- Toute nouvelle mécanique doit clairement passer par le canal 2
+  (interactions spatiales réelles) pour produire de l'émergence
+  perçue. Ne jamais compter sur le canal 1 pour ça.
+
+### À vérifier / trancher : réservation de ressource
+- Actuellement : à confirmer si deux agents peuvent cibler le même
+  buisson simultanément (premier arrivé le vide sous le nez du second)
+  ou si un mécanisme de réservation existe déjà. Décider consciemment
+  lors d'une prochaine session touchant à Seeking/Eating — les deux
+  sont des designs valides mais changent la nature de la compétition
+  entre agents.
+
+### Chaos volontaire (piste future, non urgente)
+- Possible feature "comparaison de timelines" : lancer deux World au
+  même seed, appliquer une commande sur l'un seul, comparer les hash
+  tick par tick pour visualiser la vitesse de divergence. Amusant,
+  cohérent avec l'esprit "petri dish", zéro coût d'architecture.
+  Pas prioritaire.
+
 ## Portabilité (cible WASM future)
 - PAS de threads, pas de Parallel.For. Simulation mono-thread.
 - Invariant culture only.
