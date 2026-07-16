@@ -323,3 +323,60 @@
   moi : rendu réel (buissons qui apparaissent/disparaissent
   visiblement, cendre qui repousse en herbe, agents qui errent au lieu
   de geler) — à confirmer via F5.
+
+## Session 11 — Équilibre du monde
+- Fait : diagnostic obligatoire d'abord (SimReport 500k ticks, 3 seeds)
+  — hypothèse du cliquet arbres confirmée sans ambiguïté avant tout
+  code (arbres jamais plafonnés, jusqu'à 8859 à 500k ticks, population
+  quasi éteinte sur les 3 seeds). Fix retenu : Option A seule (durée de
+  vie des arbres), pas B (séparer les tableaux ne résout rien de plus
+  une fois les arbres mortels — voir raisonnement dans le plan).
+  Vegetation.DeathTick (tick absolu, -1 = immortel par l'âge — les
+  buissons le restent, ils sortent déjà par la consommation).
+  VegetationType.LifespanTicks/LifespanVarianceTicks dans
+  vegetation.json (0 pour bush, 60000±20000 pour tree — valeur ajustée
+  empiriquement via SimReport, pas devinée). TickVegetationAging
+  (nouveau, même patron swap-scan que CleanupDeadAgents) retire les
+  arbres arrivés à échéance dans le même bloc tick lent que croissance/
+  repousse/cendre. Matrice d'interaction écrite avant code : confirmé
+  qu'un arbre ne peut pas mourir de vieillesse pendant qu'il brûle
+  (TickFire s'exécute avant TickVegetationAging dans le même Tick(),
+  le feu a déjà retiré l'instance si applicable), qu'un arbre mort
+  libère de l'herbe jamais de la cendre (la cendre est exclusivement un
+  produit du feu), et que les agents en Seeking ne sont jamais impactés
+  (TryFindNearestMatureBush ne cible que les buissons, confirmé).
+  --scarcity recalibré APRÈS le fix (comme demandé) : AgentDensity/
+  VegetationDensity ajustés à 0.0011/0.03 après plusieurs essais réels
+  (pas estimés) jusqu'à obtenir un déclin qui ralentit nettement au
+  lieu d'un massacre total. SimReport gagne --fire/--fire-interval/
+  --fire-radius (positions tirées d'un Rng local au rapport, seedé sur
+  --seed — stimulus externe comme un clic joueur, hors Hash()) et deux
+  compteurs cumulés (TilesBurnedCumulative, VegetationLostToFire,
+  diagnostics comme MealsEaten — hors Hash()). CLAUDE.md : règle
+  "aucune accumulation à sens unique" ajoutée sous Boucle de simulation.
+  31 tests verts (27 précédents + 4 nouveaux : arbre qui meurt et
+  libère sa case en laissant de l'herbe, arbres qui ne s'accumulent
+  plus indéfiniment sur 500k ticks, population qui survit sur 500k
+  ticks sur 2 seeds, plus les tests existants revérifiés).
+  **Golden-hash recalculé** (comportement changé légitimement) :
+  8812310094165850180 → 1977737263434058813.
+- Cassé : rien de connu, build + tests verts (8s en config par défaut,
+  2s en Release, y compris les tests à 500k ticks).
+- Prochaine fois : reproduction régulée par la capacité de charge —
+  maintenant que la nourriture respire vraiment (arbres plafonnés,
+  buissons qui remontent), c'est le bon moment. SimReport 500k ticks,
+  seed 42 : AVANT (session 10, non plafonné) — arbres 0→8859 sans
+  jamais redescendre, population 199→5. APRÈS (ce fix) — arbres
+  montent puis REDESCENDENT (pic ~3030 vers 50k, 898 à 500k), buissons
+  mûrs remontent en miroir (10024→12193), population 199→66 (bien
+  mieux, mais toujours en déclin lent — normal sans reproduction :
+  aucune naissance, seulement des sorties). --scarcity recalibré,
+  seed 42 : 288→26 sur 500k ticks avec ralentissement net de la pente
+  (contre 786→0 avant) — pas un plateau parfaitement stable (impossible
+  sans naissances), mais un vrai signal de pression qui ralentit plutôt
+  qu'un massacre. --fire --fire-interval 3000 --fire-radius 8 sur 50k
+  ticks : 9240 tuiles brûlées cumulées, 183 végétation perdue au feu,
+  cendre qui fluctue et repousse en herbe visible dans le rapport (le
+  ash→grass de la session 10 tourne enfin en conditions réelles). Non
+  vérifié par moi : rendu réel des arbres qui meurent/disparaissent
+  visiblement — à confirmer via F5.

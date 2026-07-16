@@ -9,4 +9,8 @@ public sealed class VegetationType
     public required double SpawnChance { get; init; }
     public required bool Flammable { get; init; }
     public required int FoodValue { get; init; }
+
+    // 0 = immortel par l'âge (sort par un autre chemin, ex: consommation).
+    public required int LifespanTicks { get; init; }
+    public required int LifespanVarianceTicks { get; init; }
 }

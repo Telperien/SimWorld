@@ -38,6 +38,10 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - Liste active : on ne simule que ce qui bouge. Jamais de full sweep.
 - Deux vitesses : tick tuiles 30 Hz, tick civs 1 Hz.
 - Mise à jour étalée des agents : chacun pense 1 tick sur 4.
+- Aucune accumulation à sens unique. Toute ressource/état qui s'accumule
+  doit avoir un chemin de sortie (mort, décroissance, récupération).
+  Vérifier ce point pour CHAQUE nouvelle entité — c'est la classe de
+  bug de la cendre irréversible et des arbres immortels.
 
 ## Déterminisme (critique)
 - RNG maison seedé (Xorshift). JAMAIS Random.Shared, DateTime.Now, Stopwatch.

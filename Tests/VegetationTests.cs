@@ -226,4 +226,47 @@ public class VegetationTests
 
         Assert.True(grassTiles > 0);
     }
+
+    [Fact]
+    public void Tree_Dies_AndFreesSlot()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 55, size: 16, catalog, vegetation, config);
+
+        catalog.TryGetId("grass", out byte grass);
+        vegetation.TryGetId("tree", out byte treeType);
+        world.SetTerrainId(6, 6, grass);
+        world.ForceSpawnVegetation(6, 6, treeType, stage: 1);
+        world.SetVegetationDeathTick(6, 6, 0);
+
+        world.Tick(World.TickIntervalSeconds);
+
+        Assert.False(world.TryGetVegetationAt(6, 6, out _));
+        // Mort de vieillesse != feu : la tuile reste de l'herbe, jamais
+        // de la cendre (cf. matrice d'interaction du plan).
+        Assert.Equal(grass, world.GetTerrainId(6, 6));
+    }
+
+    [Fact]
+    public void Trees_DoNotAccumulateIndefinitely()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 42, size: 512, catalog, vegetation, config);
+
+        vegetation.TryGetId("tree", out byte treeType);
+
+        for (int i = 0; i < 500_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        // Sans plafond (avant le fix), les arbres dépassaient 8800 sur
+        // ce seed/durée et continuaient de monter sans redescendre.
+        // Marge généreuse au-dessus du plateau observé empiriquement.
+        Assert.True(world.CountVegetationOfType(treeType) < 5000);
+    }
 }

@@ -222,6 +222,24 @@ public class AgentTests
         Assert.True(sawMoving);
     }
 
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Population_Survives_LongRun(int seed)
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed, size: 256, catalog, vegetation, config);
+
+        for (int i = 0; i < 500_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        Assert.True(world.AliveCount > 0);
+    }
+
     [Fact]
     public void Agents_DieOfHunger_InScarcityScenario()
     {

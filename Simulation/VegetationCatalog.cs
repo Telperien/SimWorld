@@ -49,6 +49,8 @@ public sealed class VegetationCatalog
                 SpawnChance = dto.SpawnChance,
                 Flammable = dto.Flammable,
                 FoodValue = dto.FoodValue,
+                LifespanTicks = dto.LifespanTicks,
+                LifespanVarianceTicks = dto.LifespanVarianceTicks,
             };
             byId[dto.Id] = vegetation;
             idByName[name] = dto.Id;
@@ -70,5 +72,5 @@ public sealed class VegetationCatalog
         return Convert.ToUInt32(trimmed, 16);
     }
 
-    private sealed record VegetationDto(byte Id, string Color, int MatureStage, double SpawnChance, bool Flammable, int FoodValue);
+    private sealed record VegetationDto(byte Id, string Color, int MatureStage, double SpawnChance, bool Flammable, int FoodValue, int LifespanTicks, int LifespanVarianceTicks);
 }

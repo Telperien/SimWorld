@@ -80,9 +80,13 @@ public sealed class World
 
     public int AshTileCount { get; private set; }
 
-    // Compteur de diagnostic (comme les morts par cause) : n'influence
-    // jamais la simulation, donc exclu de Hash().
+    // Compteurs de diagnostic (comme les morts par cause) : n'influencent
+    // jamais la simulation, donc exclus de Hash().
     public int MealsEaten { get; private set; }
+
+    public int TilesBurnedCumulative { get; private set; }
+
+    public int VegetationLostToFire { get; private set; }
 
     public World(int seed, int size, TerrainCatalog catalog, VegetationCatalog vegetationCatalog, SimulationConfig config)
     {
@@ -225,6 +229,15 @@ public sealed class World
         }
     }
 
+    public void SetVegetationDeathTick(int x, int y, int deathTick)
+    {
+        int slot = _vegetationIndexAt[y * Size + x];
+        if (slot != -1)
+        {
+            _vegetation[slot].DeathTick = deathTick;
+        }
+    }
+
     // Seam de test : retire la végétation présente (si il y en a) pour
     // poser l'horodatage de délai de repousse sans dépendre d'un agent
     // qui mange ou d'un feu.
@@ -274,6 +287,7 @@ public sealed class World
         if (_tickCounter % _config.VegetationTickInterval == 0)
         {
             TickVegetationGrowth();
+            TickVegetationAging();
             TickVegetationSpread();
             TickAshRecovery();
         }
@@ -350,6 +364,7 @@ public sealed class World
             Mix(ref hash, veg.Type);
             Mix(ref hash, veg.Stage);
             Mix(ref hash, (uint)veg.FoodRemaining);
+            Mix(ref hash, unchecked((uint)veg.DeathTick));
         }
 
         return hash;
@@ -386,11 +401,13 @@ public sealed class World
             _terrain[index] = _ashId;
             GrassTileCount--;
             AshTileCount++;
+            TilesBurnedCumulative++;
 
             int vegSlot = _vegetationIndexAt[index];
             if (vegSlot != -1 && _vegetationCatalog.Get(_vegetation[vegSlot].Type).Flammable)
             {
                 RemoveVegetationAt(vegSlot);
+                VegetationLostToFire++;
             }
         }
 
@@ -809,13 +826,25 @@ public sealed class World
     {
         int index = y * Size + x;
         int slot = VegetationCount;
+        VegetationType typeInfo = _vegetationCatalog.Get(type);
+
+        int deathTick = -1;
+        if (typeInfo.LifespanTicks > 0)
+        {
+            int variance = typeInfo.LifespanVarianceTicks;
+            int roll = variance > 0 ? (int)(_rngVegetation.NextDouble() * (variance * 2 + 1)) - variance : 0;
+            int lifespan = Math.Max(1, typeInfo.LifespanTicks + roll);
+            deathTick = _tickCounter + lifespan;
+        }
+
         _vegetation[slot] = new Vegetation
         {
             X = x,
             Y = y,
             Type = type,
             Stage = 0,
-            FoodRemaining = _vegetationCatalog.Get(type).FoodValue,
+            FoodRemaining = typeInfo.FoodValue,
+            DeathTick = deathTick,
         };
         _vegetationIndexAt[index] = slot;
         VegetationCount++;
@@ -846,6 +875,23 @@ public sealed class World
             if (veg.Stage < matureStage)
             {
                 veg.Stage++;
+            }
+        }
+    }
+
+    private void TickVegetationAging()
+    {
+        int i = 0;
+        while (i < VegetationCount)
+        {
+            ref Vegetation veg = ref _vegetation[i];
+            if (veg.DeathTick != -1 && _tickCounter >= veg.DeathTick)
+            {
+                RemoveVegetationAt(i);
+            }
+            else
+            {
+                i++;
             }
         }
     }

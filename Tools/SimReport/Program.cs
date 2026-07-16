@@ -5,6 +5,9 @@ int seed = 42;
 int ticks = 1000;
 int size = 512;
 bool scarcity = false;
+bool fire = false;
+int fireInterval = 5000;
+int fireRadius = 5;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -22,6 +25,15 @@ for (int i = 0; i < args.Length; i++)
         case "--scarcity":
             scarcity = true;
             break;
+        case "--fire":
+            fire = true;
+            break;
+        case "--fire-interval":
+            fireInterval = int.Parse(args[++i]);
+            break;
+        case "--fire-radius":
+            fireRadius = int.Parse(args[++i]);
+            break;
     }
 }
 
@@ -30,16 +42,21 @@ var terrainCatalog = TerrainCatalog.Load(File.ReadAllText(Path.Combine(basePath,
 var vegetationCatalog = VegetationCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "vegetation.json")));
 var baseConfig = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "data", "simulation.json")));
 
-// Densite d'agents en hausse, capacite vegetale en forte baisse : force
-// un scenario de rareté reelle plutot qu'un ajustement cosmetique.
+// Densite d'agents en hausse, capacite vegetale en baisse : force une
+// vraie pression (declin qui ralentit nettement, pas un massacre total).
 var config = scarcity
-    ? baseConfig with { AgentDensity = 0.003, VegetationDensity = 0.005 }
+    ? baseConfig with { AgentDensity = 0.0011, VegetationDensity = 0.03 }
     : baseConfig;
 
 vegetationCatalog.TryGetId("bush", out byte bushType);
 vegetationCatalog.TryGetId("tree", out byte treeType);
 
 var world = new World(seed, size, terrainCatalog, vegetationCatalog, config);
+
+// Stimulus externe (comme un clic joueur) : Rng local au rapport, seede
+// sur --seed pour rester reproductible run-a-run, mais hors de World
+// (jamais dans Hash()).
+var fireRng = new Rng((ulong)seed);
 
 if (world.AgentSpawnCapped)
 {
@@ -69,6 +86,13 @@ var stopwatch = Stopwatch.StartNew();
 
 for (int i = 0; i < ticks; i++)
 {
+    if (fire && i % fireInterval == 0)
+    {
+        int fireX = (int)(fireRng.NextDouble() * size);
+        int fireY = (int)(fireRng.NextDouble() * size);
+        world.Execute(new SpawnFire(fireX, fireY, fireRadius));
+    }
+
     world.Tick(World.TickIntervalSeconds);
 
     if ((i + 1) % sampleInterval == 0 || i == ticks - 1)
@@ -79,7 +103,8 @@ for (int i = 0; i < ticks; i++)
 
 stopwatch.Stop();
 
-Console.WriteLine($"SimReport -- seed={seed} size={size} ticks={ticks}{(scarcity ? " --scarcity" : "")}");
+string flags = (scarcity ? " --scarcity" : "") + (fire ? $" --fire (interval={fireInterval} radius={fireRadius})" : "");
+Console.WriteLine($"SimReport -- seed={seed} size={size} ticks={ticks}{flags}");
 Console.WriteLine($"Duree: {stopwatch.Elapsed.TotalSeconds:F2}s");
 Console.WriteLine();
 Console.WriteLine($"{"tick",8} {"pop",6} {"bjeune",7} {"bmur",6} {"arbre",6} {"herbe",8} {"cendre",7}");
@@ -118,6 +143,9 @@ Console.WriteLine();
 Console.WriteLine($"Repas cumules: {world.MealsEaten}");
 Console.WriteLine("Morts par cause:");
 Console.WriteLine($"  Faim: {world.GetDeathCount(DeathCause.Hunger)}");
+
+Console.WriteLine();
+Console.WriteLine($"Feu: {world.TilesBurnedCumulative} tuiles brulees (cumule), {world.VegetationLostToFire} vegetation perdue au feu");
 
 Console.WriteLine();
 Console.WriteLine($"Hash final: 0x{world.Hash():X16}");
