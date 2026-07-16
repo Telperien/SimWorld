@@ -80,6 +80,6 @@ public class DeterminismTests
             world.Tick(World.TickIntervalSeconds);
         }
 
-        Assert.Equal(1977737263434058813UL, world.Hash());
+        Assert.Equal(6184348331482291659UL, world.Hash());
     }
 }

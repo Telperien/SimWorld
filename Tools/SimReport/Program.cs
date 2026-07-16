@@ -45,7 +45,7 @@ var baseConfig = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "
 // Densite d'agents en hausse, capacite vegetale en baisse : force une
 // vraie pression (declin qui ralentit nettement, pas un massacre total).
 var config = scarcity
-    ? baseConfig with { AgentDensity = 0.0011, VegetationDensity = 0.03 }
+    ? baseConfig with { AgentDensity = 0.0011, BushDensity = 0.03, TreeDensity = 0.012 }
     : baseConfig;
 
 vegetationCatalog.TryGetId("bush", out byte bushType);
@@ -156,6 +156,41 @@ for (int y = 0; y < size; y++)
 }
 
 Console.WriteLine($"Herbe par quadrant (fin de run):       HG={grassQuadrants[0]} HD={grassQuadrants[1]} BG={grassQuadrants[2]} BD={grassQuadrants[3]}");
+
+// Mesure de clusterisation (etape 6, session 13) : distance moyenne au
+// buisson mur le plus proche pour un point d'herbe TIRE AU HASARD (pas
+// seulement les mourants) -- Rng local au rapport, hors de World, jamais
+// dans Hash(), meme esprit que fireRng.
+var clusterRng = new Rng((ulong)seed ^ 0xC1AA5D1FUL);
+const int clusterSampleTarget = 2000;
+int clusterSamples = 0;
+double clusterDistanceSum = 0.0;
+int clusterAttempts = 0;
+int clusterMaxAttempts = clusterSampleTarget * 50;
+
+while (clusterSamples < clusterSampleTarget && clusterAttempts < clusterMaxAttempts)
+{
+    clusterAttempts++;
+    int sx = (int)(clusterRng.NextDouble() * size);
+    int sy = (int)(clusterRng.NextDouble() * size);
+    if (world.GetTerrainId(sx, sy) != grassTerrainId)
+    {
+        continue;
+    }
+
+    double distance = world.DistanceToNearestMatureBush(sx, sy);
+    if (double.IsFinite(distance))
+    {
+        clusterDistanceSum += distance;
+        clusterSamples++;
+    }
+}
+
+Console.WriteLine();
+if (clusterSamples > 0)
+{
+    Console.WriteLine($"Clusterisation -- distance moyenne au buisson mur le plus proche pour {clusterSamples} points d'herbe tires au hasard : {clusterDistanceSum / clusterSamples:F2}");
+}
 
 Console.WriteLine();
 Console.WriteLine($"Repas cumules: {world.MealsEaten}");

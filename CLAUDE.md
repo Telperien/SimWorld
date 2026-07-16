@@ -42,6 +42,9 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   doit avoir un chemin de sortie (mort, décroissance, récupération).
   Vérifier ce point pour CHAQUE nouvelle entité — c'est la classe de
   bug de la cendre irréversible et des arbres immortels.
+- Corollaire : aucune ressource ne doit pouvoir disparaître LOCALEMENT
+  sans pouvoir revenir LOCALEMENT. Une régénération globale sur une
+  déplétion locale crée des déserts permanents (bug des buissons, s10-13).
 
 ## Déterminisme (critique)
 - RNG maison seedé (Xorshift). JAMAIS Random.Shared, DateTime.Now, Stopwatch.
@@ -121,6 +124,10 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - Chaque civ a son byte[] _known ; elle ne score QUE ce qu'elle connaît.
   Aucune omniscience.
 - Pas de ML, pas de réseau de neurones.
+- L'errance de secours doit être DIRIGÉE (marche corrélée), jamais une
+  marche aléatoire pure : le déplacement d'une marche aléatoire croît
+  en √N, donc elle ne peut pas échapper à une zone stérile plus large
+  que quelques tuiles.
 
 ## Lisibilité
 - Toute valeur affichée = Breakdown(final, Modifier[]). Jamais un float nu.

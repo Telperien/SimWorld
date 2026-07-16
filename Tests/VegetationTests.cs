@@ -63,7 +63,11 @@ public class VegetationTests
             }
         }
 
-        for (int i = 0; i < config.VegetationTickInterval * 3; i++)
+        // Sans buisson/arbre existant nulle part, seule la germination
+        // spontanée (taux volontairement bas, s13) peut amorcer la
+        // végétation -- plus de ticks qu'avant pour laisser une chance
+        // raisonnable au tirage sur une carte 64x64.
+        for (int i = 0; i < config.VegetationTickInterval * 30; i++)
         {
             world.Tick(World.TickIntervalSeconds);
         }
@@ -103,20 +107,16 @@ public class VegetationTests
     public void Vegetation_RegrowsAfterDelay_NotInstantly()
     {
         var catalog = LoadCatalog();
-        // Capacité de végétation portée à 100 % des tuiles : sans ça, la
-        // chance de repousse élevée sature la capacité avant même que le
-        // balayage (point de départ tournant) atteigne la tuile (8,8),
-        // ce qui ferait échouer le test pour une raison sans rapport
-        // avec le délai qu'il vérifie.
-        var config = LoadSimulationConfig() with { VegetationDensity = 1.0 };
-        // Catalogue synthétique : chance de repousse très haute pour un
-        // test déterministe qui ne dépend pas du tuning réel du jeu.
-        var vegetation = VegetationCatalog.Load("""
+        var vegetation = LoadVegetationCatalog();
+        // Capacité large + taux de diffusion haut : test déterministe qui
+        // ne dépend pas du tuning réel du jeu (VegetationSpreadChance en
+        // conditions normales est bien plus bas).
+        var config = LoadSimulationConfig() with
         {
-          "bush": { "id": 0, "color": "#000000", "matureStage": 1, "spawnChance": 0.9, "flammable": false, "foodValue": 10 },
-          "tree": { "id": 1, "color": "#000000", "matureStage": 1, "spawnChance": 0.0, "flammable": true, "foodValue": 0 }
-        }
-        """);
+            BushDensity = 1.0,
+            TreeDensity = 1.0,
+            VegetationSpreadChance = 0.9,
+        };
 
         var world = new World(seed: 40, size: 16, catalog, vegetation, config);
         catalog.TryGetId("grass", out byte grass);
@@ -129,6 +129,12 @@ public class VegetationTests
         }
 
         vegetation.TryGetId("bush", out byte bushType);
+        // Buisson source adjacent en (9,8) : la repousse locale (s13) ne
+        // remplit plus qu'un slot AILLEURS sur la carte, elle diffuse
+        // depuis un buisson existant. Sans source voisine, seule la
+        // germination spontanée (bien plus rare) pourrait retomber pile
+        // sur (8,8), ce qui rendrait ce test non déterministe.
+        world.ForceSpawnVegetation(9, 8, bushType, stage: 1);
         world.ForceSpawnVegetation(8, 8, bushType, stage: 1);
         world.ClearVegetationAt(8, 8);
 
@@ -147,12 +153,12 @@ public class VegetationTests
     }
 
     [Fact]
-    public void Vegetation_SpatialDistribution_IsBalanced()
+    public void Bushes_RecolonizeDepletedZone_Locally()
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var config = LoadSimulationConfig();
-        var world = new World(seed: 70, size: 64, catalog, vegetation, config);
+        var config = LoadSimulationConfig() with { VegetationSpreadChance = 0.8, VegetationSpontaneousChance = 0.0 };
+        var world = new World(seed: 71, size: 64, catalog, vegetation, config);
 
         catalog.TryGetId("grass", out byte grass);
         for (int y = 0; y < world.Size; y++)
@@ -163,26 +169,145 @@ public class VegetationTests
             }
         }
 
-        for (int i = 0; i < config.VegetationTickInterval * 200; i++)
+        vegetation.TryGetId("bush", out byte bushType);
+
+        // Zone rasée 11x11 (rien à l'intérieur), ceinturée de buissons
+        // source juste à l'extérieur. La diffusion avance d'au plus un
+        // anneau par tick végétation (snapshot de BushCount avant la
+        // boucle, cf. World.cs) : après 3 ticks, elle ne peut
+        // mécaniquement pas avoir atteint le centre (5 tuiles de la
+        // bordure), mais doit avoir atteint l'anneau intérieur immédiat.
+        const int zoneMin = 26, zoneMax = 36;
+        for (int y = zoneMin - 1; y <= zoneMax + 1; y++)
+        {
+            for (int x = zoneMin - 1; x <= zoneMax + 1; x++)
+            {
+                bool onBorder = x == zoneMin - 1 || x == zoneMax + 1 || y == zoneMin - 1 || y == zoneMax + 1;
+                bool insideZone = x >= zoneMin && x <= zoneMax && y >= zoneMin && y <= zoneMax;
+                if (onBorder && !insideZone)
+                {
+                    world.ForceSpawnVegetation(x, y, bushType, stage: 1);
+                }
+            }
+        }
+
+        for (int i = 0; i < config.VegetationTickInterval * 3; i++)
         {
             world.Tick(World.TickIntervalSeconds);
         }
 
+        int innerBorderCount = 0;
+        for (int x = zoneMin; x <= zoneMax; x++)
+        {
+            if (world.TryGetVegetationAt(x, zoneMin, out _)) innerBorderCount++;
+            if (world.TryGetVegetationAt(x, zoneMax, out _)) innerBorderCount++;
+        }
+        for (int y = zoneMin + 1; y <= zoneMax - 1; y++)
+        {
+            if (world.TryGetVegetationAt(zoneMin, y, out _)) innerBorderCount++;
+            if (world.TryGetVegetationAt(zoneMax, y, out _)) innerBorderCount++;
+        }
+
+        int centerX = (zoneMin + zoneMax) / 2;
+        int centerY = (zoneMin + zoneMax) / 2;
+        bool centerStillEmpty =
+            !world.TryGetVegetationAt(centerX, centerY, out _) &&
+            !world.TryGetVegetationAt(centerX - 1, centerY, out _) &&
+            !world.TryGetVegetationAt(centerX + 1, centerY, out _) &&
+            !world.TryGetVegetationAt(centerX, centerY - 1, out _) &&
+            !world.TryGetVegetationAt(centerX, centerY + 1, out _);
+
+        Assert.True(innerBorderCount > 0, "la bordure intérieure de la zone vidée n'a pas repoussé depuis les buissons voisins");
+        Assert.True(centerStillEmpty, "le centre de la zone a déjà repoussé -- la diffusion n'est plus locale");
+    }
+
+    [Fact]
+    public void Bushes_CanRecolonize_FullyClearedRegion()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig() with { VegetationSpontaneousChance = 0.05 };
+        var world = new World(seed: 72, size: 32, catalog, vegetation, config);
+
+        catalog.TryGetId("grass", out byte grass);
+        for (int y = 0; y < world.Size; y++)
+        {
+            for (int x = 0; x < world.Size; x++)
+            {
+                world.SetTerrainId(x, y, grass);
+            }
+        }
+
+        // Aucune source de graines nulle part sur la carte : seule la
+        // germination spontanée (piège symétrique, s13) peut faire
+        // repartir la végétation depuis zéro.
+        Assert.Equal(0, world.VegetationCount);
+
+        for (int i = 0; i < config.VegetationTickInterval * 10; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        Assert.True(world.VegetationCount > 0, "aucune germination spontanée -- une région entièrement rasée resterait stérile pour toujours");
+    }
+
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Vegetation_SpatialDistribution_IsBalanced(int seed)
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed, size: 512, catalog, vegetation, config);
+
+        for (int i = 0; i < 2_000_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        catalog.TryGetId("grass", out byte grass);
         int half = world.Size / 2;
-        int[] quadrants = new int[4];
+        int[] vegQuadrants = new int[4];
+        int[] grassQuadrants = new int[4];
+
         for (int i = 0; i < world.VegetationCount; i++)
         {
             Vegetation veg = world.GetVegetation(i);
             int quadrant = (veg.X < half ? 0 : 1) + (veg.Y < half ? 0 : 2);
-            quadrants[quadrant]++;
+            vegQuadrants[quadrant]++;
+        }
+
+        for (int y = 0; y < world.Size; y++)
+        {
+            for (int x = 0; x < world.Size; x++)
+            {
+                if (world.GetTerrainId(x, y) == grass)
+                {
+                    int quadrant = (x < half ? 0 : 1) + (y < half ? 0 : 2);
+                    grassQuadrants[quadrant]++;
+                }
+            }
         }
 
         Assert.True(world.VegetationCount > 20, "pas assez de végétation pour juger de la répartition");
 
-        double average = world.VegetationCount / 4.0;
-        foreach (int count in quadrants)
+        // Compare le RATIO végétation/herbe par quadrant, pas les totaux
+        // bruts : c'est ce ratio qui doit rester stable si la repousse
+        // suit la disponibilité réelle du terrain plutôt que de dériver
+        // (cf. diagnostic s12 -- l'ancienne version de ce test mesurait
+        // des totaux bruts à court terme et ne voyait pas la dérive).
+        double[] ratios = new double[4];
+        for (int q = 0; q < 4; q++)
         {
-            Assert.InRange(count, average * 0.5, average * 1.5);
+            Assert.True(grassQuadrants[q] > 0, $"quadrant {q} sans herbe -- terrain dégénéré pour ce seed");
+            ratios[q] = vegQuadrants[q] / (double)grassQuadrants[q];
+        }
+
+        double averageRatio = (ratios[0] + ratios[1] + ratios[2] + ratios[3]) / 4.0;
+        foreach (double ratio in ratios)
+        {
+            Assert.InRange(ratio, averageRatio * 0.5, averageRatio * 1.5);
         }
     }
 
@@ -249,24 +374,36 @@ public class VegetationTests
         Assert.Equal(grass, world.GetTerrainId(6, 6));
     }
 
-    [Fact]
-    public void Trees_DoNotAccumulateIndefinitely()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Trees_StabilizeOverLongRun(int seed)
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 42, size: 512, catalog, vegetation, config);
+        var world = new World(seed, size: 512, catalog, vegetation, config);
 
         vegetation.TryGetId("tree", out byte treeType);
 
-        for (int i = 0; i < 500_000; i++)
+        for (int i = 0; i < 1_000_000; i++)
         {
             world.Tick(World.TickIntervalSeconds);
         }
+        int treeCountMidway = world.CountVegetationOfType(treeType);
 
-        // Sans plafond (avant le fix), les arbres dépassaient 8800 sur
-        // ce seed/durée et continuaient de monter sans redescendre.
-        // Marge généreuse au-dessus du plateau observé empiriquement.
-        Assert.True(world.CountVegetationOfType(treeType) < 5000);
+        for (int i = 0; i < 1_000_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+        int treeCountFinal = world.CountVegetationOfType(treeType);
+
+        // Un vrai plateau (à son plafond de capacité ou en dessous, peu
+        // importe) : ni extinction (le cliquet inversé introduit par le
+        // fix de s11, cause racine = tableau partagé -- corrigé cette
+        // session par la séparation bush/tree), ni dérive continue dans
+        // un sens ou l'autre entre 1M et 2M ticks.
+        Assert.True(treeCountFinal > 20, $"arbres proches de l'extinction : {treeCountFinal}");
+        Assert.InRange(treeCountFinal, treeCountMidway * 0.8, treeCountMidway * 1.25);
     }
 }

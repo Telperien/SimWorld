@@ -36,8 +36,10 @@ public sealed class World
     private readonly bool[] _burning;
     private readonly Agent[] _agents;
     private readonly List<int>[] _agentPaths;
-    private readonly Vegetation[] _vegetation;
-    private readonly int[] _vegetationIndexAt;
+    private readonly Vegetation[] _bushes;
+    private readonly int[] _bushIndexAt;
+    private readonly Vegetation[] _trees;
+    private readonly int[] _treeIndexAt;
     private readonly int[] _vegetationClearedTick;
     private readonly TerrainCatalog _catalog;
     private readonly VegetationCatalog _vegetationCatalog;
@@ -87,7 +89,16 @@ public sealed class World
 
     public int AliveCount { get; private set; }
 
-    public int VegetationCount { get; private set; }
+    // Arbres et buissons vivent dans deux tableaux à capacité indépendante
+    // (session 13) : ils ne se disputent plus les slots. VegetationCount/
+    // GetVegetation restent une concaténation logique bush-puis-tree pour
+    // ne pas casser les appelants (tests, SimReport) qui itèrent "la"
+    // végétation sans se soucier du type.
+    public int BushCount { get; private set; }
+
+    public int TreeCount { get; private set; }
+
+    public int VegetationCount => BushCount + TreeCount;
 
     public bool AgentSpawnCapped { get; private set; }
 
@@ -186,9 +197,13 @@ public sealed class World
 
         SpawnAgents();
 
-        _vegetation = new Vegetation[(int)(config.VegetationDensity * size * size)];
-        _vegetationIndexAt = new int[size * size];
-        Array.Fill(_vegetationIndexAt, -1);
+        _bushes = new Vegetation[(int)(config.BushDensity * size * size)];
+        _bushIndexAt = new int[size * size];
+        Array.Fill(_bushIndexAt, -1);
+
+        _trees = new Vegetation[(int)(config.TreeDensity * size * size)];
+        _treeIndexAt = new int[size * size];
+        Array.Fill(_treeIndexAt, -1);
 
         _vegetationClearedTick = new int[size * size];
         Array.Fill(_vegetationClearedTick, NeverClearedSentinel);
@@ -202,78 +217,121 @@ public sealed class World
 
     public Agent GetAgent(int index) => _agents[index];
 
-    public Vegetation GetVegetation(int index) => _vegetation[index];
+    public Vegetation GetVegetation(int index) => index < BushCount ? _bushes[index] : _trees[index - BushCount];
 
     public int GetDeathCount(DeathCause cause) => _deathsByCause[(byte)cause];
 
     public int CountVegetationOfType(byte type)
     {
-        int count = 0;
-        for (int i = 0; i < VegetationCount; i++)
+        if (type == _bushTypeId)
         {
-            if (_vegetation[i].Type == type)
-            {
-                count++;
-            }
+            return BushCount;
         }
-        return count;
+        if (type == _treeTypeId)
+        {
+            return TreeCount;
+        }
+        return 0;
     }
 
     public int CountMatureVegetationOfType(byte type)
     {
         int matureStage = _vegetationCatalog.Get(type).MatureStage;
-        int count = 0;
-        for (int i = 0; i < VegetationCount; i++)
+        if (type == _bushTypeId)
         {
-            if (_vegetation[i].Type == type && _vegetation[i].Stage >= matureStage)
+            return CountMature(_bushes, BushCount, matureStage);
+        }
+        if (type == _treeTypeId)
+        {
+            return CountMature(_trees, TreeCount, matureStage);
+        }
+        return 0;
+    }
+
+    private static int CountMature(Vegetation[] array, int count, int matureStage)
+    {
+        int result = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (array[i].Stage >= matureStage)
             {
-                count++;
+                result++;
             }
         }
-        return count;
+        return result;
     }
 
     public bool TryGetVegetationAt(int x, int y, out Vegetation vegetation)
     {
-        int slot = _vegetationIndexAt[y * Size + x];
-        if (slot == -1)
+        int index = y * Size + x;
+
+        int bushSlot = _bushIndexAt[index];
+        if (bushSlot != -1)
         {
-            vegetation = default;
-            return false;
+            vegetation = _bushes[bushSlot];
+            return true;
         }
 
-        vegetation = _vegetation[slot];
-        return true;
+        int treeSlot = _treeIndexAt[index];
+        if (treeSlot != -1)
+        {
+            vegetation = _trees[treeSlot];
+            return true;
+        }
+
+        vegetation = default;
+        return false;
     }
 
     public void ForceSpawnVegetation(int x, int y, byte type, byte stage)
     {
-        int index = y * Size + x;
-        int existingSlot = _vegetationIndexAt[index];
-        if (existingSlot != -1)
-        {
-            RemoveVegetationAt(existingSlot);
-        }
+        ClearVegetationAt(x, y);
+        SpawnVegetationOfType(x, y, type);
 
-        SpawnVegetation(x, y, type);
-        _vegetation[_vegetationIndexAt[index]].Stage = stage;
+        int index = y * Size + x;
+        if (type == _bushTypeId)
+        {
+            _bushes[_bushIndexAt[index]].Stage = stage;
+        }
+        else if (type == _treeTypeId)
+        {
+            _trees[_treeIndexAt[index]].Stage = stage;
+        }
     }
 
     public void SetVegetationFoodRemaining(int x, int y, int amount)
     {
-        int slot = _vegetationIndexAt[y * Size + x];
-        if (slot != -1)
+        int index = y * Size + x;
+
+        int bushSlot = _bushIndexAt[index];
+        if (bushSlot != -1)
         {
-            _vegetation[slot].FoodRemaining = amount;
+            _bushes[bushSlot].FoodRemaining = amount;
+            return;
+        }
+
+        int treeSlot = _treeIndexAt[index];
+        if (treeSlot != -1)
+        {
+            _trees[treeSlot].FoodRemaining = amount;
         }
     }
 
     public void SetVegetationDeathTick(int x, int y, int deathTick)
     {
-        int slot = _vegetationIndexAt[y * Size + x];
-        if (slot != -1)
+        int index = y * Size + x;
+
+        int bushSlot = _bushIndexAt[index];
+        if (bushSlot != -1)
         {
-            _vegetation[slot].DeathTick = deathTick;
+            _bushes[bushSlot].DeathTick = deathTick;
+            return;
+        }
+
+        int treeSlot = _treeIndexAt[index];
+        if (treeSlot != -1)
+        {
+            _trees[treeSlot].DeathTick = deathTick;
         }
     }
 
@@ -282,11 +340,50 @@ public sealed class World
     // qui mange ou d'un feu.
     public void ClearVegetationAt(int x, int y)
     {
-        int slot = _vegetationIndexAt[y * Size + x];
-        if (slot != -1)
+        int index = y * Size + x;
+
+        int bushSlot = _bushIndexAt[index];
+        if (bushSlot != -1)
         {
-            RemoveVegetationAt(slot);
+            RemoveBushAt(bushSlot);
+            return;
         }
+
+        int treeSlot = _treeIndexAt[index];
+        if (treeSlot != -1)
+        {
+            RemoveTreeAt(treeSlot);
+        }
+    }
+
+    // Distance euclidienne au buisson mûr le plus proche, SANS la limite
+    // de portée du BFS de gameplay (_maxSearchRadius) : balaie tout
+    // _bushes[0..BushCount), la "vraie" distance. Utilisée par le
+    // diagnostic de mort (s12) et par la mesure de clusterisation de
+    // SimReport (s13). double.PositiveInfinity si aucun buisson mûr.
+    public double DistanceToNearestMatureBush(int x, int y)
+    {
+        int matureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
+        double best = double.PositiveInfinity;
+
+        for (int i = 0; i < BushCount; i++)
+        {
+            ref Vegetation veg = ref _bushes[i];
+            if (veg.Stage < matureStage)
+            {
+                continue;
+            }
+
+            double dx = veg.X - x;
+            double dy = veg.Y - y;
+            double distance = Math.Sqrt(dx * dx + dy * dy);
+            if (distance < best)
+            {
+                best = distance;
+            }
+        }
+
+        return best;
     }
 
     public void SetAgentHunger(int index, byte hunger) => _agents[index].Hunger = hunger;
@@ -384,6 +481,8 @@ public sealed class World
             Mix(ref hash, agent.Hunger);
             Mix(ref hash, agent.Facing);
             Mix(ref hash, agent.SeekCooldown);
+            Mix(ref hash, agent.WanderDirection);
+            Mix(ref hash, agent.WanderTicksRemaining);
 
             List<int> path = _agentPaths[i];
             Mix(ref hash, (ulong)path.Count);
@@ -393,11 +492,22 @@ public sealed class World
             }
         }
 
-        Mix(ref hash, (ulong)VegetationCount);
-
-        for (int i = 0; i < VegetationCount; i++)
+        Mix(ref hash, (ulong)BushCount);
+        for (int i = 0; i < BushCount; i++)
         {
-            ref Vegetation veg = ref _vegetation[i];
+            ref Vegetation veg = ref _bushes[i];
+            Mix(ref hash, (uint)veg.X);
+            Mix(ref hash, (uint)veg.Y);
+            Mix(ref hash, veg.Type);
+            Mix(ref hash, veg.Stage);
+            Mix(ref hash, (uint)veg.FoodRemaining);
+            Mix(ref hash, unchecked((uint)veg.DeathTick));
+        }
+
+        Mix(ref hash, (ulong)TreeCount);
+        for (int i = 0; i < TreeCount; i++)
+        {
+            ref Vegetation veg = ref _trees[i];
             Mix(ref hash, (uint)veg.X);
             Mix(ref hash, (uint)veg.Y);
             Mix(ref hash, veg.Type);
@@ -442,11 +552,23 @@ public sealed class World
             AshTileCount++;
             TilesBurnedCumulative++;
 
-            int vegSlot = _vegetationIndexAt[index];
-            if (vegSlot != -1 && _vegetationCatalog.Get(_vegetation[vegSlot].Type).Flammable)
+            int bushSlot = _bushIndexAt[index];
+            if (bushSlot != -1)
             {
-                RemoveVegetationAt(vegSlot);
-                VegetationLostToFire++;
+                if (_vegetationCatalog.Get(_bushes[bushSlot].Type).Flammable)
+                {
+                    RemoveBushAt(bushSlot);
+                    VegetationLostToFire++;
+                }
+            }
+            else
+            {
+                int treeSlot = _treeIndexAt[index];
+                if (treeSlot != -1 && _vegetationCatalog.Get(_trees[treeSlot].Type).Flammable)
+                {
+                    RemoveTreeAt(treeSlot);
+                    VegetationLostToFire++;
+                }
             }
         }
 
@@ -648,9 +770,9 @@ public sealed class World
     private void HarvestTick(ref Agent agent)
     {
         int index = agent.TargetY * Size + agent.TargetX;
-        int slot = _vegetationIndexAt[index];
+        int slot = _bushIndexAt[index];
 
-        if (slot == -1 || _vegetation[slot].Type != _bushTypeId)
+        if (slot == -1)
         {
             // Le buisson a disparu (vidé ou brûlé) pendant que l'agent
             // mangeait déjà (concurrence sans réservation, hors scope).
@@ -658,13 +780,13 @@ public sealed class World
             return;
         }
 
-        int harvested = Math.Min(_config.HarvestAmountPerTick, _vegetation[slot].FoodRemaining);
-        _vegetation[slot].FoodRemaining -= harvested;
+        int harvested = Math.Min(_config.HarvestAmountPerTick, _bushes[slot].FoodRemaining);
+        _bushes[slot].FoodRemaining -= harvested;
         agent.Hunger = (byte)Math.Max(0, agent.Hunger - harvested);
 
-        if (_vegetation[slot].FoodRemaining <= 0)
+        if (_bushes[slot].FoodRemaining <= 0)
         {
-            RemoveVegetationAt(slot);
+            RemoveBushAt(slot);
             agent.State = AgentState.Idle;
             return;
         }
@@ -690,25 +812,45 @@ public sealed class World
         agent.TargetY = targetY;
     }
 
+    // Errance dirigée (session 13) : conserve une direction sur plusieurs
+    // essais (marche corrélée, déplacement net linéaire en N) plutôt que
+    // de retirer une direction à chaque pas (marche aléatoire pure, √N —
+    // incapable d'échapper à une zone stérile plus large que quelques
+    // tuiles, cf. CLAUDE.md).
     private void TryStartMoving(ref Agent agent)
     {
         int currentX = (int)MathF.Floor(agent.X);
         int currentY = (int)MathF.Floor(agent.Y);
 
-        int direction = (int)(_rngAgents.NextUInt64() >> 62);
+        bool keepDirection = agent.WanderTicksRemaining > 0 && _rngAgents.NextDouble() >= _config.WanderTurnChance;
+
+        int direction;
+        if (keepDirection)
+        {
+            direction = agent.WanderDirection;
+            agent.WanderTicksRemaining--;
+        }
+        else
+        {
+            direction = (int)(_rngAgents.NextUInt64() >> 62);
+            agent.WanderDirection = (byte)direction;
+            agent.WanderTicksRemaining = _config.WanderPersistenceTicks;
+        }
+
         int dx = direction == 0 ? -1 : direction == 1 ? 1 : 0;
         int dy = direction == 2 ? -1 : direction == 3 ? 1 : 0;
 
         int targetX = currentX + dx;
         int targetY = currentY + dy;
 
-        if (targetX < 0 || targetX >= Size || targetY < 0 || targetY >= Size)
+        if (targetX < 0 || targetX >= Size || targetY < 0 || targetY >= Size ||
+            !_catalog.Get(_terrain[targetY * Size + targetX]).Walkable)
         {
-            return;
-        }
-
-        if (!_catalog.Get(_terrain[targetY * Size + targetX]).Walkable)
-        {
+            // Direction bloquée (bord de carte / obstacle) : force un
+            // nouveau tirage au prochain essai plutôt que de re-cogner
+            // indéfiniment contre le même mur (même esprit que le fix
+            // anti-gel du cooldown de faim, s10).
+            agent.WanderTicksRemaining = 0;
             return;
         }
 
@@ -749,8 +891,8 @@ public sealed class World
             int worldX = originX + lx;
             int worldY = originY + ly;
 
-            int vegSlot = _vegetationIndexAt[worldY * Size + worldX];
-            if (vegSlot != -1 && _vegetation[vegSlot].Type == _bushTypeId && _vegetation[vegSlot].Stage >= matureStage)
+            int bushSlot = _bushIndexAt[worldY * Size + worldX];
+            if (bushSlot != -1 && _bushes[bushSlot].Stage >= matureStage)
             {
                 ReconstructPath(current, originX, originY, outputPath);
                 return true;
@@ -818,7 +960,7 @@ public sealed class World
         tileX = Math.Clamp(tileX, 0, Size - 1);
         tileY = Math.Clamp(tileY, 0, Size - 1);
 
-        double distance = FindNearestMatureBushDistanceUnbounded(tileX, tileY);
+        double distance = DistanceToNearestMatureBush(tileX, tileY);
         _deathDistanceHistogram[DistanceBucket(distance)]++;
 
         byte terrainId = _terrain[tileY * Size + tileX];
@@ -842,35 +984,6 @@ public sealed class World
             }
         }
         return DeathDistanceBucketBounds.Length;
-    }
-
-    // Distance euclidienne au buisson mûr le plus proche, SANS la limite
-    // de portée du BFS de gameplay (_maxSearchRadius) : balaie tout
-    // _vegetation[0..VegetationCount), la "vraie" distance pour le
-    // diagnostic. double.PositiveInfinity si aucun buisson mûr n'existe.
-    private double FindNearestMatureBushDistanceUnbounded(int x, int y)
-    {
-        int matureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
-        double best = double.PositiveInfinity;
-
-        for (int i = 0; i < VegetationCount; i++)
-        {
-            ref Vegetation veg = ref _vegetation[i];
-            if (veg.Type != _bushTypeId || veg.Stage < matureStage)
-            {
-                continue;
-            }
-
-            double dx = veg.X - x;
-            double dy = veg.Y - y;
-            double distance = Math.Sqrt(dx * dx + dy * dy);
-            if (distance < best)
-            {
-                best = distance;
-            }
-        }
-
-        return best;
     }
 
     private void CleanupDeadAgents()
@@ -933,6 +1046,8 @@ public sealed class World
                 Hunger = 0,
                 Facing = 0,
                 SeekCooldown = 0,
+                WanderDirection = 0,
+                WanderTicksRemaining = 0,
                 SearchFailureStreak = 0,
                 TicksIdle = 0,
                 TicksMoving = 0,
@@ -947,56 +1062,113 @@ public sealed class World
         AgentSpawnCapped = spawned < _agents.Length;
     }
 
-    private void SpawnVegetation(int x, int y, byte type)
+    private int ComputeDeathTick(VegetationType typeInfo)
     {
-        int index = y * Size + x;
-        int slot = VegetationCount;
-        VegetationType typeInfo = _vegetationCatalog.Get(type);
-
-        int deathTick = -1;
-        if (typeInfo.LifespanTicks > 0)
+        if (typeInfo.LifespanTicks <= 0)
         {
-            int variance = typeInfo.LifespanVarianceTicks;
-            int roll = variance > 0 ? (int)(_rngVegetation.NextDouble() * (variance * 2 + 1)) - variance : 0;
-            int lifespan = Math.Max(1, typeInfo.LifespanTicks + roll);
-            deathTick = _tickCounter + lifespan;
+            return -1;
         }
 
-        _vegetation[slot] = new Vegetation
+        int variance = typeInfo.LifespanVarianceTicks;
+        int roll = variance > 0 ? (int)(_rngVegetation.NextDouble() * (variance * 2 + 1)) - variance : 0;
+        int lifespan = Math.Max(1, typeInfo.LifespanTicks + roll);
+        return _tickCounter + lifespan;
+    }
+
+    private void SpawnVegetationOfType(int x, int y, byte type)
+    {
+        if (type == _bushTypeId)
+        {
+            SpawnBush(x, y);
+        }
+        else if (type == _treeTypeId)
+        {
+            SpawnTree(x, y);
+        }
+    }
+
+    private void SpawnBush(int x, int y)
+    {
+        int index = y * Size + x;
+        int slot = BushCount;
+        VegetationType typeInfo = _vegetationCatalog.Get(_bushTypeId);
+
+        _bushes[slot] = new Vegetation
         {
             X = x,
             Y = y,
-            Type = type,
+            Type = _bushTypeId,
             Stage = 0,
             FoodRemaining = typeInfo.FoodValue,
-            DeathTick = deathTick,
+            DeathTick = ComputeDeathTick(typeInfo),
         };
-        _vegetationIndexAt[index] = slot;
-        VegetationCount++;
+        _bushIndexAt[index] = slot;
+        BushCount++;
     }
 
-    private void RemoveVegetationAt(int slot)
+    private void SpawnTree(int x, int y)
     {
-        Vegetation removed = _vegetation[slot];
+        int index = y * Size + x;
+        int slot = TreeCount;
+        VegetationType typeInfo = _vegetationCatalog.Get(_treeTypeId);
+
+        _trees[slot] = new Vegetation
+        {
+            X = x,
+            Y = y,
+            Type = _treeTypeId,
+            Stage = 0,
+            FoodRemaining = typeInfo.FoodValue,
+            DeathTick = ComputeDeathTick(typeInfo),
+        };
+        _treeIndexAt[index] = slot;
+        TreeCount++;
+    }
+
+    private void RemoveBushAt(int slot)
+    {
+        Vegetation removed = _bushes[slot];
         int removedIndex = removed.Y * Size + removed.X;
-        _vegetationIndexAt[removedIndex] = -1;
+        _bushIndexAt[removedIndex] = -1;
         _vegetationClearedTick[removedIndex] = _tickCounter;
 
-        VegetationCount--;
-        if (slot != VegetationCount)
+        BushCount--;
+        if (slot != BushCount)
         {
-            Vegetation moved = _vegetation[VegetationCount];
-            _vegetation[slot] = moved;
-            _vegetationIndexAt[moved.Y * Size + moved.X] = slot;
+            Vegetation moved = _bushes[BushCount];
+            _bushes[slot] = moved;
+            _bushIndexAt[moved.Y * Size + moved.X] = slot;
+        }
+    }
+
+    private void RemoveTreeAt(int slot)
+    {
+        Vegetation removed = _trees[slot];
+        int removedIndex = removed.Y * Size + removed.X;
+        _treeIndexAt[removedIndex] = -1;
+        _vegetationClearedTick[removedIndex] = _tickCounter;
+
+        TreeCount--;
+        if (slot != TreeCount)
+        {
+            Vegetation moved = _trees[TreeCount];
+            _trees[slot] = moved;
+            _treeIndexAt[moved.Y * Size + moved.X] = slot;
         }
     }
 
     private void TickVegetationGrowth()
     {
-        for (int i = 0; i < VegetationCount; i++)
+        GrowArray(_bushes, BushCount, _bushTypeId);
+        GrowArray(_trees, TreeCount, _treeTypeId);
+    }
+
+    private void GrowArray(Vegetation[] array, int count, byte type)
+    {
+        int matureStage = _vegetationCatalog.Get(type).MatureStage;
+        for (int i = 0; i < count; i++)
         {
-            ref Vegetation veg = ref _vegetation[i];
-            int matureStage = _vegetationCatalog.Get(veg.Type).MatureStage;
+            ref Vegetation veg = ref array[i];
             if (veg.Stage < matureStage)
             {
                 veg.Stage++;
@@ -1007,12 +1179,24 @@ public sealed class World
     private void TickVegetationAging()
     {
         int i = 0;
-        while (i < VegetationCount)
+        while (i < BushCount)
         {
-            ref Vegetation veg = ref _vegetation[i];
-            if (veg.DeathTick != -1 && _tickCounter >= veg.DeathTick)
+            if (_bushes[i].DeathTick != -1 && _tickCounter >= _bushes[i].DeathTick)
             {
-                RemoveVegetationAt(i);
+                RemoveBushAt(i);
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        i = 0;
+        while (i < TreeCount)
+        {
+            if (_trees[i].DeathTick != -1 && _tickCounter >= _trees[i].DeathTick)
+            {
+                RemoveTreeAt(i);
             }
             else
             {
@@ -1021,27 +1205,120 @@ public sealed class World
         }
     }
 
+    // Repousse locale (session 13) : remplace l'ancien scan global i.i.d.
+    // (une repousse pouvait apparaître n'importe où sur la carte, jamais
+    // préférentiellement près d'un buisson existant -- exactement le bug
+    // diagnostiqué en s12). Même pattern de diffusion que le feu, mais un
+    // seul passage par tick végétation (pas de chaîne dans le même tick :
+    // BushCount/TreeCount sont capturés en snapshot avant chaque boucle).
     private void TickVegetationSpread()
     {
-        double bushChance = _vegetationCatalog.Get(_bushTypeId).SpawnChance;
-        double treeChance = _vegetationCatalog.Get(_treeTypeId).SpawnChance;
-        int tileCount = _terrain.Length;
+        SpreadBushesLocally();
+        SpreadTreesLocally();
+        SpawnSpontaneously();
+    }
 
-        // Point de départ tournant (déterministe, tiré de _rngVegetation) :
-        // évite qu'un balayage toujours parti de (0,0) privilégie
-        // systématiquement le haut-gauche quand la capacité sature.
+    private void SpreadBushesLocally()
+    {
+        int count = BushCount;
+        for (int i = 0; i < count; i++)
+        {
+            int x = _bushes[i].X;
+            int y = _bushes[i].Y;
+            TrySpreadBushTo(x - 1, y);
+            TrySpreadBushTo(x + 1, y);
+            TrySpreadBushTo(x, y - 1);
+            TrySpreadBushTo(x, y + 1);
+        }
+    }
+
+    private void TrySpreadBushTo(int x, int y)
+    {
+        if (x < 0 || x >= Size || y < 0 || y >= Size || BushCount >= _bushes.Length)
+        {
+            return;
+        }
+
+        int index = y * Size + x;
+        if (_terrain[index] != _grassId || _bushIndexAt[index] != -1 || _treeIndexAt[index] != -1)
+        {
+            return;
+        }
+
+        if (_tickCounter - _vegetationClearedTick[index] < _config.VegetationRegrowthDelayTicks)
+        {
+            return;
+        }
+
+        if (_rngVegetation.NextDouble() >= _config.VegetationSpreadChance)
+        {
+            return;
+        }
+
+        SpawnBush(x, y);
+    }
+
+    private void SpreadTreesLocally()
+    {
+        int count = TreeCount;
+        for (int i = 0; i < count; i++)
+        {
+            int x = _trees[i].X;
+            int y = _trees[i].Y;
+            TrySpreadTreeTo(x - 1, y);
+            TrySpreadTreeTo(x + 1, y);
+            TrySpreadTreeTo(x, y - 1);
+            TrySpreadTreeTo(x, y + 1);
+        }
+    }
+
+    private void TrySpreadTreeTo(int x, int y)
+    {
+        if (x < 0 || x >= Size || y < 0 || y >= Size || TreeCount >= _trees.Length)
+        {
+            return;
+        }
+
+        int index = y * Size + x;
+        if (_terrain[index] != _grassId || _bushIndexAt[index] != -1 || _treeIndexAt[index] != -1)
+        {
+            return;
+        }
+
+        if (_tickCounter - _vegetationClearedTick[index] < _config.VegetationRegrowthDelayTicks)
+        {
+            return;
+        }
+
+        if (_rngVegetation.NextDouble() >= _config.VegetationSpreadChance)
+        {
+            return;
+        }
+
+        SpawnTree(x, y);
+    }
+
+    // Germination spontanée résiduelle (piège symétrique) : sans elle,
+    // une région entièrement rasée (aucun buisson/arbre voisin pour
+    // diffuser) ne pourrait jamais repartir. Taux volontairement bas par
+    // rapport à la diffusion locale -- un filet de sécurité, pas le
+    // mécanisme principal de repousse. Même scan tournant que l'ancien
+    // mécanisme (évite le biais spatial fixé en s11).
+    private void SpawnSpontaneously()
+    {
+        int tileCount = _terrain.Length;
         int startIndex = (int)(_rngVegetation.NextDouble() * tileCount);
 
         for (int offset = 0; offset < tileCount; offset++)
         {
-            if (VegetationCount >= _vegetation.Length)
+            if (BushCount >= _bushes.Length && TreeCount >= _trees.Length)
             {
                 return;
             }
 
             int index = (startIndex + offset) % tileCount;
 
-            if (_terrain[index] != _grassId || _vegetationIndexAt[index] != -1)
+            if (_terrain[index] != _grassId || _bushIndexAt[index] != -1 || _treeIndexAt[index] != -1)
             {
                 continue;
             }
@@ -1054,13 +1331,13 @@ public sealed class World
             int x = index % Size;
             int y = index / Size;
 
-            if (_rngVegetation.NextDouble() < bushChance)
+            if (BushCount < _bushes.Length && _rngVegetation.NextDouble() < _config.VegetationSpontaneousChance)
             {
-                SpawnVegetation(x, y, _bushTypeId);
+                SpawnBush(x, y);
             }
-            else if (_rngVegetation.NextDouble() < treeChance)
+            else if (TreeCount < _trees.Length && _rngVegetation.NextDouble() < _config.VegetationSpontaneousChance)
             {
-                SpawnVegetation(x, y, _treeTypeId);
+                SpawnTree(x, y);
             }
         }
     }

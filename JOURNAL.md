@@ -405,3 +405,42 @@
   + séparation arbres/buissons en deux tableaux (option B session 11,
   le cliquet des arbres est inversé mais pas cassé — cause racine :
   tableau partagé à capacité fixe).
+
+## Session 13 — Le fix : budget de faim, repousse locale, errance dirigée
+- Fait : arbres/buissons séparés en deux tableaux à capacité indépendante
+  (ne se disputent plus les slots) ; repousse locale par diffusion
+  depuis la végétation existante (comme le feu, double-buffer implicite)
+  + germination spontanée résiduelle à taux bas (piège symétrique :
+  une région rasée peut toujours repartir) ; errance idle dirigée
+  (WanderDirection/WanderTicksRemaining, incluse dans Hash()) au lieu
+  d'une marche aléatoire pure — vérifié empiriquement (~800 agents,
+  5 seeds) : déplacement net ≈1.5x celui d'une marche aléatoire pure ;
+  cooldown de recherche 10→3 ticks de pensée. Trouvaille imprévue en
+  cours de route : la diffusion locale seule, à la capacité historique
+  (5%), crée une course au plafond global entre buissons — quelques
+  gros amas gagnent presque toute la capacité, laissant de vrais
+  déserts ailleurs (clusterisation mesurée à 35-42 tuiles, PIRE
+  qu'avant). Diagnostiqué en élevant expérimentalement le plafond :
+  au-delà de la course, l'équilibre naturel (récolte + délai de
+  repousse vs diffusion) se stabilise seul, bien en dessous du
+  plafond, si celui-ci est assez généreux. Retenu : bushDensity
+  0.05→0.3 (équilibre naturel observé ~78 590, identique sur les deux
+  seeds, donc pas un artefact de plafond) ; treeDensity laissé à 0.02
+  (les arbres n'ont pas cet équilibre naturel sous-plafond — ils
+  occupent tout plafond donné, mais restent un vrai plateau stable,
+  ni ratchet vers 0 ni extinction, ce qui était le seul bug réel de
+  s11). Résultat 2M ticks : seed 42 → 11 morts de faim (198 avant),
+  clusterisation 1,15 (contre 35+ avec la capacité historique) ; seed
+  7 → 1 mort de faim, clusterisation 0,70. Scarcity et feu revérifiés
+  (feu : 2 morts/199, cendre repousse normalement ; scarcity : forte
+  pression comme voulu, sans rapport avec le critère "conditions
+  normales").
+- Cassé : rien de comportemental non voulu. 38/38 tests verts,
+  golden-hash recalculé et signalé (nouveaux champs Agent inclus,
+  nouvelle logique de repousse — changement de comportement assumé).
+- Prochaine fois : la densité de buissons ~66% de l'herbe (nécessaire
+  pour éviter la course au plafond) est peut-être trop dense
+  visuellement/thématiquement — à juger une fois le rendu réel en
+  place. Si des morts de faim résiduelles apparaissent à plus grande
+  échelle (2000 agents visés), reconsidérer MaxFoodSearchRadius
+  (non touché cette session, comme convenu).

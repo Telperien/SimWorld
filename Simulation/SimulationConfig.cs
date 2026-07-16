@@ -6,7 +6,8 @@ public sealed record SimulationConfig
 {
     public required double FireSpreadChance { get; init; }
     public required double AgentDensity { get; init; }
-    public required double VegetationDensity { get; init; }
+    public required double BushDensity { get; init; }
+    public required double TreeDensity { get; init; }
     public required int VegetationTickInterval { get; init; }
     public required double IdleMoveChance { get; init; }
     public required double AgentMoveSpeed { get; init; }
@@ -22,6 +23,10 @@ public sealed record SimulationConfig
     public required int VegetationRegrowthDelayTicks { get; init; }
     public required double AshToGrassChance { get; init; }
     public required byte SeekFailureCooldownThinkTicks { get; init; }
+    public required double VegetationSpreadChance { get; init; }
+    public required double VegetationSpontaneousChance { get; init; }
+    public required byte WanderPersistenceTicks { get; init; }
+    public required double WanderTurnChance { get; init; }
 
     public static SimulationConfig Load(string json)
     {

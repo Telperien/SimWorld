@@ -37,6 +37,12 @@ public struct Agent
     // nourriture après un échec (cf. cooldown de famine, session 10).
     public byte SeekCooldown;
 
+    // Errance dirigée (session 13) : marche corrélée plutôt qu'aléatoire
+    // pure, pour un déplacement net linéaire en N plutôt qu'en √N.
+    // Influence le comportement -> incluse dans Hash().
+    public byte WanderDirection;
+    public byte WanderTicksRemaining;
+
     // --- Diagnostic (session 12) ---
     // Écrits uniquement, jamais lus par une décision : n'influencent
     // jamais le comportement, donc exclus de World.Hash().

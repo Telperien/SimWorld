@@ -246,7 +246,7 @@ public class AgentTests
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
         var baseConfig = LoadSimulationConfig();
-        var scarcityConfig = baseConfig with { AgentDensity = 0.003, VegetationDensity = 0.005 };
+        var scarcityConfig = baseConfig with { AgentDensity = 0.003, BushDensity = 0.005, TreeDensity = 0.002 };
         var world = new World(seed: 60, size: 128, catalog, vegetation, scarcityConfig);
 
         for (int i = 0; i < 4000; i++)
@@ -255,6 +255,89 @@ public class AgentTests
         }
 
         Assert.True(world.GetDeathCount(DeathCause.Hunger) > 0);
+    }
+
+    [Fact]
+    public void Agent_Wandering_CoversDistance_LinearlyNotSqrt()
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        // Jamais affamé (seuil de recherche hors de portée) : seule
+        // l'errance idle est en jeu, jamais le Seeking piloté par BFS.
+        var config = LoadSimulationConfig() with { HungerSeekThreshold = 255, IdleMoveChance = 1.0 };
+        var world = new World(seed: 91, size: 1024, catalog, vegetation, config);
+
+        catalog.TryGetId("sand", out byte sand);
+        for (int y = 0; y < world.Size; y++)
+        {
+            for (int x = 0; x < world.Size; x++)
+            {
+                world.SetTerrainId(x, y, sand);
+            }
+        }
+
+        // Moyenne sur TOUS les agents, pas un seul : un agent isolé peut
+        // par malchance démarrer près d'un bord de carte et se faire
+        // bloquer plusieurs fois de suite (vérifié empiriquement -- un
+        // agent proche du bord gauche restait coincé ~70 ticks de
+        // pensée), ce qui n'a rien à voir avec la qualité du mécanisme
+        // d'errance lui-même. La moyenne sur toute la population lisse
+        // cet effet de bord et la chance individuelle.
+        int n = world.AliveCount;
+        var originX = new float[n];
+        var originY = new float[n];
+        for (int a = 0; a < n; a++)
+        {
+            Agent agent = world.GetAgent(a);
+            originX[a] = agent.X;
+            originY[a] = agent.Y;
+        }
+
+        int thinkTicks = 150;
+        for (int i = 0; i < thinkTicks * 4; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        double displacementSum = 0;
+        for (int a = 0; a < n; a++)
+        {
+            Agent agent = world.GetAgent(a);
+            double dx = agent.X - originX[a];
+            double dy = agent.Y - originY[a];
+            displacementSum += Math.Sqrt(dx * dx + dy * dy);
+        }
+        double averageDisplacement = displacementSum / n;
+        double randomWalkExpectation = Math.Sqrt(thinkTicks);
+
+        // Mesuré empiriquement (5 seeds, ~800 agents chacun) : ~18 pour
+        // ~12.25 attendu par une marche aléatoire pure, un facteur ~1.5
+        // constant. Marge de x1.3 pour rester robuste sans être trivial.
+        Assert.True(averageDisplacement > randomWalkExpectation * 1.3,
+            $"déplacement net moyen {averageDisplacement:F1} pas nettement supérieur à une marche aléatoire pure (~{randomWalkExpectation:F1})");
+    }
+
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Population_StarvationIsRare_InNormalConditions(int seed)
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed, size: 512, catalog, vegetation, config);
+
+        for (int i = 0; i < 2_000_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        // La population décline toujours vers 0 sans reproduction --
+        // normal, ce n'est PAS le critère. Seule la CAUSE de mort compte :
+        // le budget de faim ne doit plus être le tueur quasi-systématique
+        // qu'il était avant le fix (198/199 avant, cf. diagnostic s12).
+        int hungerDeaths = world.GetDeathCount(DeathCause.Hunger);
+        Assert.True(hungerDeaths < 20, $"{hungerDeaths} morts de faim sur 199 agents -- le fix de budget énergétique n'a pas tenu");
     }
 
     [Fact]
