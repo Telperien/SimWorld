@@ -57,6 +57,14 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - Requêtes spatiales (voisinage, choix de partenaire) : parcours en ordre
   stable (index croissant), jamais dépendant de l'ordre d'insertion.
 
+### Sauvegarde (prépare, ne construis pas encore)
+- Tout nouvel état ajouté à World (civs, territoire, castes...) DOIT
+  être ajouté à Hash() dans la même session qui l'introduit. Jamais
+  après coup, jamais "je le ferai plus tard" — un hash incomplet est
+  un bug de save latent invisible jusqu'au jour où on charge.
+- La sauvegarde réelle (sérialisation complète, format de fichier)
+  n'est construite qu'après la session 17 (civs stables), pas avant.
+
 ## Portabilité (cible WASM future)
 - PAS de threads, pas de Parallel.For. Simulation mono-thread.
 - Invariant culture only.
