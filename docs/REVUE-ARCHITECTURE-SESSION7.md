@@ -94,3 +94,97 @@ les divergences Windows/Linux et les régressions de déterminisme par refactor.
 Le livrable est ce rapport. Si l'utilisateur veut enchaîner : la session 8
 naturelle est le point 🔴 1+2+3 (IDs stables, flux RNG, hash complet + golden
 test CI) AVANT d'écrire la reproduction.
+
+---
+
+# Addendum — cadrage pour la suite (process, design, frontières)
+
+Complément au-delà du code actuel, destiné à l'IA qui codera les prochaines
+sessions. À lire avec CLAUDE.md et JOURNAL.md.
+
+## A. Trous concrets déjà présents dans le code (faciles à oublier)
+
+- **Le feu est inoffensif pour les agents.** `TickFire` ne touche jamais
+  `Agent[]`, une tuile en feu reste walkable, l'errance et le BFS traversent
+  le feu sans réaction. C'est aujourd'hui un non-choix silencieux — à trancher
+  explicitement (dégâts ? fuite ? tuile interdite ?) lors d'une session dédiée.
+- **Un buisson (flammable=false) survit au feu et reste posé sur de la cendre**,
+  alors que la repousse ne cible que l'herbe. Quirk cohérent mais à assumer
+  ou corriger consciemment.
+- Ces deux points illustrent la règle générale : **à chaque nouveau système,
+  écrire dans le plan de session la matrice d'interaction avec CHAQUE système
+  existant** (même pour dire « aucune »). Les combinaisons non écrites
+  deviennent des bugs muets — et leur nombre croît au carré du nombre de
+  systèmes (feu × bâtiments × agents × civs × pouvoirs…).
+
+## B. Process de dev agentique (le vrai multiplicateur du projet)
+
+- **Harnais headless.** Un runner console (dans /Tests ou un /Tools, jamais
+  /Game) qui construit World, tick N milliers de fois et imprime un SimReport
+  (pop, morts par cause, courbe de végétation, hash final). L'IA qui code doit
+  pouvoir vérifier le COMPORTEMENT sans lancer Godot — aujourd'hui seule la
+  boucle F5 humaine valide le gameplay réel, et le journal montre que c'est
+  déjà le goulot (chaque session se termine par « non vérifié par moi »).
+  C'est aussi l'outil de tuning : lancer 10 000 ticks et regarder la courbe
+  de population vaut mieux que régler au ressenti.
+- **ValidateInvariants() de debug**, appelée dans les tests : cohérence des
+  tableaux miroirs (`_vegetationIndexAt` ↔ `_vegetation`, bientôt agents et
+  bâtiments), compteurs, états légaux. Le pattern « tableau compacté + miroir
+  tuile→slot » va se répliquer pour chaque type d'entité ; un miroir
+  désynchronisé est une corruption silencieuse que le hash ne localise pas.
+- **Budget de perf commité.** Un test qui mesure le coût d'un tick 512² peuplé
+  et échoue au-delà d'un seuil (avec marge, côté /Tests — Stopwatch y est
+  permis, pas dans /Simulation). Le dev agentique régresse la perf sans la
+  voir ; un chiffre en CI la protège.
+- **L'ordre des systèmes dans Tick() est un contrat** (déterminisme, saves,
+  replays). Le documenter en un seul endroit et ne le changer que sciemment,
+  jamais au fil d'un refactor.
+
+## C. Design des prochains systèmes — pièges connus d'avance
+
+- **Généalogie ≠ Agent[].** Les parents meurent et sont compactés : la lignée
+  doit vivre dans un stockage séparé (record de naissance : Id, MotherId,
+  FatherId, tick de naissance/mort) — rétention à vie pour les castes tracked,
+  ring buffer borné pour les anonymes (déjà prévu dans CLAUDE.md, mais à ne
+  PAS confondre avec le tableau des vivants au moment de coder la
+  reproduction).
+- **Reproduction régulée par capacité de charge : attendre des oscillations.**
+  Une régulation à seuil produit naturellement des dents de scie démographiques
+  (boom → famine → effondrement → boom). Prévoir une réponse progressive
+  (probabilité de naissance qui décroît à l'approche de la capacité) plutôt
+  que binaire, et une politique explicite quand Agent[] est plein : refuser
+  les naissances, jamais agrandir le tableau.
+- **Deuxième espèce = régime alimentaire en JSON.** La recherche de nourriture
+  hardcode aujourd'hui « buisson mûr » pour tout le monde — correct avec une
+  seule espèce, faux dès la deuxième. Le jour où Species ≠ 0 existe, le régime
+  (types de végétation ciblés, seuils) passe dans un species.json. Pas avant.
+- **Pouvoirs divins = des ICommand, rien d'autre.** L'identité de WorldBox,
+  c'est les jouets destructifs que le joueur lâche sur une sim qui réagit.
+  SpawnFire est le modèle exact : chaque pouvoir passe par les systèmes
+  existants (feu, terrain, agents), jamais de logique spéciale dans World
+  pour un pouvoir. Si un pouvoir a besoin d'un chemin spécial, c'est le
+  système sous-jacent qui manque.
+- **Vitesse de jeu (pause/×2/×3) : toujours N ticks par frame avec le même dt
+  fixe, jamais un dt plus grand.** Et rendre une seule fois par frame quel que
+  soit N — le rendu par tick devient le goulot dès ×3.
+
+## D. Frontière sim/rendu — à verrouiller avant qu'elle ne s'érode
+
+- **Toute mutation externe passe par Execute(ICommand).** `SetTerrainId`,
+  `ForceSpawnVegetation`, `SetAgentHunger` sont des seams de test : les passer
+  `internal` + `InternalsVisibleTo("Tests")`. Sinon l'UI ou le rendu finira
+  par muter le monde hors commandes, et le replay (seed + log de commandes =
+  reproduction de bug gratuite + format de save alternatif) sera mort avant
+  d'exister.
+- **Dirty list de présentation, pas d'events gameplay.** Quand les bâtiments
+  seront peints dans la texture « au changement de tier » (CLAUDE.md), le
+  rendu devra savoir quoi repeindre sans balayer la carte : une liste de
+  tuiles sales produite par la sim, consommée et vidée par le rendu, purement
+  présentation. À ne pas confondre avec les events gameplay (interdits par
+  CLAUDE.md : les capacités se dérivent) — le gameplay dérive, le rendu peut
+  consommer une dirty list.
+- **Centraliser la conversion écran→tuile.** Le clic suppose aujourd'hui
+  position monde = pixel = tuile (sprite à l'origine, échelle 1) ; ça cassera
+  dès que la scène bouge ou qu'un HUD arrive. Une seule fonction, utilisée
+  par tous les outils/brosses à venir (et les brosses voudront du
+  cliquer-glisser, pas juste le clic simple actuel).
