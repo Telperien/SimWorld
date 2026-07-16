@@ -188,3 +188,53 @@ sessions. À lire avec CLAUDE.md et JOURNAL.md.
   dès que la scène bouge ou qu'un HUD arrive. Une seule fonction, utilisée
   par tous les outils/brosses à venir (et les brosses voudront du
   cliquer-glisser, pas juste le clic simple actuel).
+
+---
+
+# Addendum 2 — implémentation des règles ajoutées au CLAUDE.md (2026-07-16)
+
+Points à prendre en compte quand les sections « Récolte — réservation de
+cible » et « Ressources — pool commun » passeront en code.
+
+## Réservation de cible — les pièges
+
+- **Réserver par index de TUILE, pas par slot de végétation.** Le tableau
+  `_vegetation` est compacté par swap-with-last (`RemoveVegetationAt`) :
+  un slot réservé devient dangling dès qu'une autre végétation est retirée
+  — exactement le même piège que MotherId/index d'agent (mine 🔴 n°1).
+  Les tuiles, elles, ne bougent jamais : `int tileIndex` réservé +
+  lookup via `_vegetationIndexAt` reste valide. Stockage plat :
+  `TargetTile`/`ReservedTile` dans la struct Agent, ou un `_reservedBy`
+  par tuile — jamais de Dictionary.
+- **Libération de la réservation = la vraie difficulté.** À libérer quand :
+  l'agent meurt (le swap-with-last de `CleanupDeadAgents` doit nettoyer),
+  l'agent abandonne (échec de chemin, changement d'état), ET quand la
+  cible disparaît sous lui — le feu détruit la végétation flammable
+  (`TickFire`) : un gisement de bois (arbre, flammable=true) réservé peut
+  brûler pendant que l'agent s'en approche. Chaque chemin de suppression
+  de végétation doit invalider les réservations associées, sinon agents
+  zombies marchant vers du vide.
+- **Interaction avec la recherche BFS** : la recherche doit sauter les
+  cibles réservées → en famine, les recherches s'allongent (moins de
+  cibles éligibles). Se combine avec le point 🟠 6 (stampede) : le
+  cooldown d'échec devient encore plus nécessaire, pas moins.
+- **Hash() dans la même session** (règle CLAUDE.md « Sauvegarde ») : l'état
+  de réservation influence le futur → il entre dans Hash() le jour où il
+  existe, comme les chemins d'agents déjà notés dans la mine 🔴 n°3.
+
+## Pool commun — les pièges
+
+- **La récolte étalée exige un état « quantité restante » sur la source**
+  (arbre entamé, gisement) — data-driven (vegetation.json / materials
+  .json), jamais en dur, et dans Hash() dès son introduction.
+- **Un état FSM Harvesting** de plus sur l'agent (byte, comme le reste) ;
+  le taux de récolte par tick vient du JSON.
+- **Le pool par civ est un simple int[] par matériau** — trivial et
+  déterministe. Le point de vigilance est ailleurs : CLAUDE.md impose
+  « capacités DÉRIVÉES à chaque tick civ » — le pool, lui, est un STOCK
+  (état accumulé, pas dérivable). C'est correct et voulu, mais l'IA doit
+  garder la distinction nette : stocks = état persistant hashé ;
+  capacités (production possible, logement) = dérivées, jamais stockées.
+- **Avant les civs** : rien à faire — la règle le dit explicitement,
+  Hunger individuel inchangé. Ne pas créer de pool « orphelin » pour les
+  agents sans civ.
