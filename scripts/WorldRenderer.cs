@@ -5,7 +5,6 @@ public partial class WorldRenderer : Sprite2D
 {
     private const int Seed = 42;
     private const int Size = 512;
-    private const double TickInterval = 1.0 / 30.0;
     private const int FireRadius = 3;
     private static readonly Color FireColor = new(1f, 0.4f, 0f);
 
@@ -25,7 +24,10 @@ public partial class WorldRenderer : Sprite2D
         string vegetationJson = FileAccess.GetFileAsString("res://data/vegetation.json");
         _vegetationCatalog = VegetationCatalog.Load(vegetationJson);
 
-        World = new World(Seed, Size, _catalog, _vegetationCatalog);
+        string simulationJson = FileAccess.GetFileAsString("res://data/simulation.json");
+        var config = SimulationConfig.Load(simulationJson);
+
+        World = new World(Seed, Size, _catalog, _vegetationCatalog, config);
 
         _image = Image.CreateEmpty(Size, Size, false, Image.Format.Rgb8);
         _texture = ImageTexture.CreateFromImage(_image);
@@ -39,10 +41,10 @@ public partial class WorldRenderer : Sprite2D
         _accumulator += delta;
         bool ticked = false;
 
-        while (_accumulator >= TickInterval)
+        while (_accumulator >= World.TickIntervalSeconds)
         {
-            World.Tick(TickInterval);
-            _accumulator -= TickInterval;
+            World.Tick(World.TickIntervalSeconds);
+            _accumulator -= World.TickIntervalSeconds;
             ticked = true;
         }
 

@@ -16,12 +16,19 @@ public class DeterminismTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SimulationConfig LoadSimulationConfig()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
+        return SimulationConfig.Load(File.ReadAllText(path));
+    }
+
     [Fact]
     public void Agent_Id_RemainsValid_AfterMultipleDeathsAndCompactions()
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 30, size: 64, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 30, size: 64, catalog, vegetation, config);
 
         int trackedIndex = world.AliveCount - 1;
         uint trackedId = world.GetAgent(trackedIndex).Id;
@@ -41,7 +48,7 @@ public class DeterminismTests
 
         for (int i = 0; i < 8; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         Assert.True(world.AliveCount < aliveBefore);
@@ -63,13 +70,14 @@ public class DeterminismTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 12345, size: 128, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 12345, size: 128, catalog, vegetation, config);
 
         world.Execute(new SpawnFire(64, 64, radius: 3));
 
         for (int i = 0; i < 5000; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         Assert.Equal(1527739277831296971UL, world.Hash());

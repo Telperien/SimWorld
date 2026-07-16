@@ -16,14 +16,21 @@ public class WorldTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SimulationConfig LoadSimulationConfig()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
+        return SimulationConfig.Load(File.ReadAllText(path));
+    }
+
     [Fact]
     public void World_SameSeed_ProducesSameTerrain()
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
 
-        var a = new World(seed: 42, size: 64, catalog, vegetation);
-        var b = new World(seed: 42, size: 64, catalog, vegetation);
+        var a = new World(seed: 42, size: 64, catalog, vegetation, config);
+        var b = new World(seed: 42, size: 64, catalog, vegetation, config);
 
         Assert.Equal(a.Hash(), b.Hash());
     }
@@ -33,9 +40,10 @@ public class WorldTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
 
-        var a = new World(seed: 1, size: 64, catalog, vegetation);
-        var b = new World(seed: 2, size: 64, catalog, vegetation);
+        var a = new World(seed: 1, size: 64, catalog, vegetation, config);
+        var b = new World(seed: 2, size: 64, catalog, vegetation, config);
 
         Assert.NotEqual(a.Hash(), b.Hash());
     }
@@ -45,8 +53,9 @@ public class WorldTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
 
-        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation));
+        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation, config));
     }
 
     [Fact]

@@ -1,0 +1,16 @@
+{
+  "fireSpreadChance": 0.5,
+  "agentDensity": 0.00076,
+  "vegetationDensity": 0.05,
+  "vegetationTickInterval": 30,
+  "idleMoveChance": 0.1,
+  "agentMoveSpeed": 4.0,
+  "hungerIncreasePerThink": 1,
+  "hungerSeekThreshold": 150,
+  "hungerDecreasePerEatTick": 8,
+  "maxFoodSearchRadius": 16,
+  "terrainFeaturesAcrossMap": 8.0,
+  "terrainWaterThreshold": -0.1,
+  "terrainSandThreshold": 0.0,
+  "terrainGrassThreshold": 0.5
+}

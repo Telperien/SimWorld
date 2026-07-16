@@ -16,12 +16,19 @@ public class VegetationTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SimulationConfig LoadSimulationConfig()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
+        return SimulationConfig.Load(File.ReadAllText(path));
+    }
+
     [Fact]
     public void Vegetation_YoungBushes_GrowIntoMature()
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 2, size: 32, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 2, size: 32, catalog, vegetation, config);
 
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("bush", out byte bushType);
@@ -30,9 +37,9 @@ public class VegetationTests
         world.SetTerrainId(4, 4, grass);
         world.ForceSpawnVegetation(4, 4, bushType, stage: 0);
 
-        for (int i = 0; i < (matureStage + 2) * 30; i++)
+        for (int i = 0; i < (matureStage + 2) * config.VegetationTickInterval; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         Assert.True(world.TryGetVegetationAt(4, 4, out Vegetation veg));
@@ -44,7 +51,8 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 15, size: 64, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 15, size: 64, catalog, vegetation, config);
 
         catalog.TryGetId("grass", out byte grass);
         for (int y = 0; y < world.Size; y++)
@@ -55,9 +63,9 @@ public class VegetationTests
             }
         }
 
-        for (int i = 0; i < 60; i++)
+        for (int i = 0; i < config.VegetationTickInterval * 3; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         Assert.True(world.VegetationCount > 0);

@@ -27,6 +27,7 @@
   <ItemGroup>
     <Content Include="../data/terrain.json" Link="data/terrain.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../data/vegetation.json" Link="data/vegetation.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../data/simulation.json" Link="data/simulation.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

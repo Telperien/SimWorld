@@ -16,6 +16,22 @@ public class AgentTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SimulationConfig LoadSimulationConfig()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
+        return SimulationConfig.Load(File.ReadAllText(path));
+    }
+
+    // Nombre de ticks réels nécessaires pour qu'un agent, sans jamais
+    // manger, atteigne `threshold` de faim : `threshold` s'accumule par
+    // pas de `HungerIncreasePerThink`, une seule fois tous les 4 ticks
+    // réels (mise à jour étalée, cf. CLAUDE.md).
+    private static int TicksUntilHungerThreshold(SimulationConfig config, byte threshold)
+    {
+        int thinkTicksNeeded = (int)Math.Ceiling(threshold / (double)config.HungerIncreasePerThink);
+        return thinkTicksNeeded * 4;
+    }
+
     private static void MakeFoodless(World world, TerrainCatalog catalog)
     {
         catalog.TryGetId("sand", out byte sand);
@@ -33,7 +49,8 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 5, size: 128, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 5, size: 128, catalog, vegetation, config);
 
         for (int i = 0; i < world.AgentCapacity; i++)
         {
@@ -50,7 +67,8 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 1, size: 512, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 1, size: 512, catalog, vegetation, config);
 
         Assert.InRange(world.AgentCapacity, 150, 250);
         Assert.Equal(world.AgentCapacity, world.AliveCount);
@@ -61,14 +79,15 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var config = LoadSimulationConfig();
 
-        var a = new World(seed: 21, size: 128, catalog, vegetation);
-        var b = new World(seed: 21, size: 128, catalog, vegetation);
+        var a = new World(seed: 21, size: 128, catalog, vegetation, config);
+        var b = new World(seed: 21, size: 128, catalog, vegetation, config);
 
         for (int i = 0; i < 550; i++)
         {
-            a.Tick(1.0 / 30.0);
-            b.Tick(1.0 / 30.0);
+            a.Tick(World.TickIntervalSeconds);
+            b.Tick(World.TickIntervalSeconds);
         }
 
         Assert.Equal(a.Hash(), b.Hash());
@@ -79,19 +98,22 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 3, size: 64, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 3, size: 64, catalog, vegetation, config);
         MakeFoodless(world, catalog);
         int initialCount = world.AliveCount;
 
-        for (int i = 0; i < 1000; i++)
+        int deathTicks = TicksUntilHungerThreshold(config, 255);
+
+        for (int i = 0; i < deathTicks - 20; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
         Assert.Equal(initialCount, world.AliveCount);
 
         for (int i = 0; i < 40; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
         Assert.True(world.AliveCount < initialCount);
     }
@@ -101,12 +123,16 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 21, size: 128, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 21, size: 128, catalog, vegetation, config);
+
+        int seekTicks = TicksUntilHungerThreshold(config, config.HungerSeekThreshold);
+        int maxTicks = seekTicks + 100;
 
         bool sawSeeking = false;
-        for (int i = 0; i < 700 && !sawSeeking; i++)
+        for (int i = 0; i < maxTicks && !sawSeeking; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
             for (int a = 0; a < world.AliveCount; a++)
             {
                 if (world.GetAgent(a).State == AgentState.Seeking)
@@ -125,12 +151,15 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 4, size: 64, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 4, size: 64, catalog, vegetation, config);
         MakeFoodless(world, catalog);
 
-        for (int i = 0; i < 1080; i++)
+        int deathTicks = TicksUntilHungerThreshold(config, 255) + 60;
+
+        for (int i = 0; i < deathTicks; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         Assert.Equal(0, world.AliveCount);
@@ -141,7 +170,8 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 6, size: 64, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 6, size: 64, catalog, vegetation, config);
 
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("bush", out byte bushType);
@@ -156,7 +186,7 @@ public class AgentTests
 
         for (int i = 0; i < 20; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         Assert.True(world.GetAgent(0).Hunger < 200);
@@ -167,17 +197,18 @@ public class AgentTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
-        var world = new World(seed: 9, size: 128, catalog, vegetation);
+        var config = LoadSimulationConfig();
+        var world = new World(seed: 9, size: 128, catalog, vegetation, config);
 
         for (int i = 0; i < 5; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 50; i++)
         {
-            world.Tick(1.0 / 30.0);
+            world.Tick(World.TickIntervalSeconds);
         }
         long after = GC.GetAllocatedBytesForCurrentThread();
 

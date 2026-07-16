@@ -1,28 +1,32 @@
 namespace Simulation;
 
+public enum DeathCause : byte
+{
+    Hunger = 0,
+}
+
 public sealed class World
 {
+    // Cadence de simulation elle-même, pas un réglage de gameplay : reste
+    // un const C#, source unique que le renderer doit consommer.
+    public const double TickIntervalSeconds = 1.0 / 30.0;
+
     private const ulong FnvOffsetBasis = 14695981039346656037UL;
     private const ulong FnvPrime = 1099511628211UL;
-    private const double SpreadChance = 0.5;
-    private const double AgentDensity = 0.00076;
-    private const double VegetationDensity = 0.05;
-    private const int VegetationTickInterval = 30;
-    private const double IdleMoveChance = 0.1;
-    private const float MoveSpeed = 4f;
-    private const byte HungerIncreasePerThink = 1;
-    private const byte HungerSeekThreshold = 150;
-    private const byte HungerDecreasePerEatTick = 8;
-    private const int MaxSearchRadius = 16;
-    private const int BoxSide = MaxSearchRadius * 2 + 1;
 
     // Identifiants arbitraires mais fixes pour dériver un seed par flux
-    // depuis le seed principal (cf. DeriveSeed).
+    // depuis le seed principal (cf. DeriveSeed). Sel de dérivation, pas
+    // un réglage de gameplay.
     private const ulong WorldGenStreamId = 1;
     private const ulong FireStreamId = 2;
     private const ulong AgentsStreamId = 3;
     private const ulong VegetationStreamId = 4;
 
+    // Garde-fou technique (pas un réglage de gameplay) : borne le
+    // rejection sampling de SpawnAgents sur une carte quasi dégénérée.
+    private const int MaxSpawnAttemptsPerAgent = 10;
+
+    private readonly SimulationConfig _config;
     private readonly byte[] _terrain;
     private readonly bool[] _burning;
     private readonly Agent[] _agents;
@@ -39,17 +43,20 @@ public sealed class World
     private readonly byte _grassId;
     private readonly byte _bushTypeId;
     private readonly byte _treeTypeId;
+    private readonly int _maxSearchRadius;
+    private readonly int _boxSide;
+    private readonly int[] _searchGeneration;
+    private readonly int[] _searchCameFrom;
+    private readonly int[] _deathsByCause = new int[1];
     private int _tickCounter;
     private uint _nextAgentId;
 
     private List<int> _activeCurrent = new();
     private List<int> _activeNext = new();
 
-    // Buffers de travail pour la recherche BFS : entièrement écrasés (via
-    // generation-stamp) à chaque appel, jamais lus entre deux appels.
-    // Exclus de Hash() volontairement (cf. CLAUDE.md, Déterminisme).
-    private readonly int[] _searchGeneration = new int[BoxSide * BoxSide];
-    private readonly int[] _searchCameFrom = new int[BoxSide * BoxSide];
+    // Buffer de travail pour la recherche BFS : entièrement écrasé (via
+    // generation-stamp) à chaque appel, jamais lu entre deux appels.
+    // Exclu de Hash() volontairement (cf. CLAUDE.md, Déterminisme).
     private readonly List<int> _searchQueue = new();
     private int _searchGenerationCounter;
 
@@ -61,7 +68,13 @@ public sealed class World
 
     public int VegetationCount { get; private set; }
 
-    public World(int seed, int size, TerrainCatalog catalog, VegetationCatalog vegetationCatalog)
+    public bool AgentSpawnCapped { get; private set; }
+
+    public int GrassTileCount { get; private set; }
+
+    public int AshTileCount { get; private set; }
+
+    public World(int seed, int size, TerrainCatalog catalog, VegetationCatalog vegetationCatalog, SimulationConfig config)
     {
         if (size <= 0 || (size & (size - 1)) != 0)
         {
@@ -71,6 +84,7 @@ public sealed class World
         Size = size;
         _catalog = catalog;
         _vegetationCatalog = vegetationCatalog;
+        _config = config;
         _terrain = new byte[size * size];
         _burning = new bool[size * size];
 
@@ -95,9 +109,22 @@ public sealed class World
             throw new ArgumentException("vegetation catalog must define bush and tree", nameof(vegetationCatalog));
         }
 
+        _maxSearchRadius = config.MaxFoodSearchRadius;
+        _boxSide = _maxSearchRadius * 2 + 1;
+        _searchGeneration = new int[_boxSide * _boxSide];
+        _searchCameFrom = new int[_boxSide * _boxSide];
+
         GenerateTerrain();
 
-        _agents = new Agent[(int)(AgentDensity * size * size)];
+        for (int i = 0; i < _terrain.Length; i++)
+        {
+            if (_terrain[i] == _grassId)
+            {
+                GrassTileCount++;
+            }
+        }
+
+        _agents = new Agent[(int)(config.AgentDensity * size * size)];
         _agentPaths = new List<int>[_agents.Length];
         for (int i = 0; i < _agentPaths.Length; i++)
         {
@@ -106,7 +133,7 @@ public sealed class World
 
         SpawnAgents();
 
-        _vegetation = new Vegetation[(int)(VegetationDensity * size * size)];
+        _vegetation = new Vegetation[(int)(config.VegetationDensity * size * size)];
         _vegetationIndexAt = new int[size * size];
         Array.Fill(_vegetationIndexAt, -1);
     }
@@ -120,6 +147,21 @@ public sealed class World
     public Agent GetAgent(int index) => _agents[index];
 
     public Vegetation GetVegetation(int index) => _vegetation[index];
+
+    public int GetDeathCount(DeathCause cause) => _deathsByCause[(byte)cause];
+
+    public int CountVegetationOfType(byte type)
+    {
+        int count = 0;
+        for (int i = 0; i < VegetationCount; i++)
+        {
+            if (_vegetation[i].Type == type)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
 
     public bool TryGetVegetationAt(int x, int y, out Vegetation vegetation)
     {
@@ -181,7 +223,7 @@ public sealed class World
         TickAgents(delta);
         CleanupDeadAgents();
 
-        if (_tickCounter % VegetationTickInterval == 0)
+        if (_tickCounter % _config.VegetationTickInterval == 0)
         {
             TickVegetationGrowth();
             TickVegetationSpread();
@@ -287,6 +329,8 @@ public sealed class World
 
             _burning[index] = false;
             _terrain[index] = _ashId;
+            GrassTileCount--;
+            AshTileCount++;
 
             int vegSlot = _vegetationIndexAt[index];
             if (vegSlot != -1 && _vegetationCatalog.Get(_vegetation[vegSlot].Type).Flammable)
@@ -307,7 +351,7 @@ public sealed class World
             return;
         }
 
-        if (_rngFire.NextDouble() >= SpreadChance)
+        if (_rngFire.NextDouble() >= _config.FireSpreadChance)
         {
             return;
         }
@@ -336,7 +380,7 @@ public sealed class World
     private void TickAgents(double delta)
     {
         int group = _tickCounter & 3;
-        float step = MoveSpeed * (float)delta;
+        float step = (float)(_config.AgentMoveSpeed * delta);
 
         for (int i = 0; i < AliveCount; i++)
         {
@@ -362,7 +406,7 @@ public sealed class World
 
     private void ThinkAgent(ref Agent agent, int index)
     {
-        agent.Hunger = (byte)Math.Min(255, agent.Hunger + HungerIncreasePerThink);
+        agent.Hunger = (byte)Math.Min(255, agent.Hunger + _config.HungerIncreasePerThink);
 
         if (agent.Hunger >= 255)
         {
@@ -375,7 +419,7 @@ public sealed class World
             return;
         }
 
-        if (agent.Hunger >= HungerSeekThreshold)
+        if (agent.Hunger >= _config.HungerSeekThreshold)
         {
             int currentX = (int)MathF.Floor(agent.X);
             int currentY = (int)MathF.Floor(agent.Y);
@@ -398,7 +442,7 @@ public sealed class World
             return;
         }
 
-        if (agent.State == AgentState.Idle && _rngAgents.NextDouble() < IdleMoveChance)
+        if (agent.State == AgentState.Idle && _rngAgents.NextDouble() < _config.IdleMoveChance)
         {
             TryStartMoving(ref agent);
         }
@@ -408,7 +452,7 @@ public sealed class World
     {
         if (agent.State == AgentState.Eating)
         {
-            agent.Hunger = (byte)Math.Max(0, agent.Hunger - HungerDecreasePerEatTick);
+            agent.Hunger = (byte)Math.Max(0, agent.Hunger - _config.HungerDecreasePerEatTick);
             agent.EatingTimer--;
             if (agent.EatingTimer == 0)
             {
@@ -476,7 +520,7 @@ public sealed class World
         }
 
         agent.State = AgentState.Eating;
-        agent.EatingTimer = (byte)Math.Clamp(foodValue / HungerDecreasePerEatTick, 1, 255);
+        agent.EatingTimer = (byte)Math.Clamp(foodValue / _config.HungerDecreasePerEatTick, 1, 255);
     }
 
     private void SetWaypoint(ref Agent agent, int waypointIndex)
@@ -532,9 +576,9 @@ public sealed class World
         _searchGenerationCounter++;
         _searchQueue.Clear();
 
-        int originX = startX - MaxSearchRadius;
-        int originY = startY - MaxSearchRadius;
-        int startLocal = (startY - originY) * BoxSide + (startX - originX);
+        int originX = startX - _maxSearchRadius;
+        int originY = startY - _maxSearchRadius;
+        int startLocal = (startY - originY) * _boxSide + (startX - originX);
 
         _searchGeneration[startLocal] = _searchGenerationCounter;
         _searchCameFrom[startLocal] = -1;
@@ -548,8 +592,8 @@ public sealed class World
             int current = _searchQueue[head];
             head++;
 
-            int lx = current % BoxSide;
-            int ly = current / BoxSide;
+            int lx = current % _boxSide;
+            int ly = current / _boxSide;
             int worldX = originX + lx;
             int worldY = originY + ly;
 
@@ -571,7 +615,7 @@ public sealed class World
 
     private void TryEnqueue(int lx, int ly, int fromLocal, int originX, int originY)
     {
-        if (lx < 0 || lx >= BoxSide || ly < 0 || ly >= BoxSide)
+        if (lx < 0 || lx >= _boxSide || ly < 0 || ly >= _boxSide)
         {
             return;
         }
@@ -588,7 +632,7 @@ public sealed class World
             return;
         }
 
-        int local = ly * BoxSide + lx;
+        int local = ly * _boxSide + lx;
         if (_searchGeneration[local] == _searchGenerationCounter)
         {
             return;
@@ -604,8 +648,8 @@ public sealed class World
         int node = endLocal;
         while (_searchCameFrom[node] != -1)
         {
-            int lx = node % BoxSide;
-            int ly = node / BoxSide;
+            int lx = node % _boxSide;
+            int ly = node / _boxSide;
             outputPath.Add((originY + ly) * Size + (originX + lx));
             node = _searchCameFrom[node];
         }
@@ -619,6 +663,8 @@ public sealed class World
         {
             if (_agents[i].State == AgentState.Dead)
             {
+                _deathsByCause[(byte)DeathCause.Hunger]++;
+
                 aliveCount--;
                 _agents[i] = _agents[aliveCount];
 
@@ -638,8 +684,13 @@ public sealed class World
     private void SpawnAgents()
     {
         int spawned = 0;
-        while (spawned < _agents.Length)
+        int attempts = 0;
+        int maxAttempts = _agents.Length * MaxSpawnAttemptsPerAgent;
+
+        while (spawned < _agents.Length && attempts < maxAttempts)
         {
+            attempts++;
+
             int x = (int)(_rngWorldGen.NextDouble() * Size);
             int y = (int)(_rngWorldGen.NextDouble() * Size);
 
@@ -668,6 +719,7 @@ public sealed class World
         }
 
         AliveCount = spawned;
+        AgentSpawnCapped = spawned < _agents.Length;
     }
 
     private void SpawnVegetation(int x, int y, byte type)
@@ -750,7 +802,7 @@ public sealed class World
             throw new ArgumentException("terrain catalog must define water, sand, grass and stone", nameof(_catalog));
         }
 
-        double frequency = 1.0 / (Size / 8.0);
+        double frequency = 1.0 / (Size / _config.TerrainFeaturesAcrossMap);
 
         for (int y = 0; y < Size; y++)
         {
@@ -758,9 +810,9 @@ public sealed class World
             {
                 double elevation = noise.Sample(x * frequency, y * frequency);
                 byte terrain =
-                    elevation < -0.1 ? water :
-                    elevation < 0.0 ? sand :
-                    elevation < 0.5 ? grass :
+                    elevation < _config.TerrainWaterThreshold ? water :
+                    elevation < _config.TerrainSandThreshold ? sand :
+                    elevation < _config.TerrainGrassThreshold ? grass :
                     stone;
                 _terrain[y * Size + x] = terrain;
             }

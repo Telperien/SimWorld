@@ -33,6 +33,13 @@ public sealed class TerrainCatalog
 
         foreach (var (name, dto) in dtos)
         {
+            if (byId[dto.Id] is not null)
+            {
+                throw new ArgumentException(
+                    $"duplicate terrain id {dto.Id}: already used by '{byId[dto.Id]!.Name}', conflicting entry '{name}'",
+                    nameof(json));
+            }
+
             var terrain = new TerrainType
             {
                 Name = name,

@@ -229,3 +229,51 @@
   moi-même — si le golden-hash test passe en local (Windows) et échoue
   en CI après un push, ce sera une vraie divergence flottante
   cross-plateforme à investiguer, pas un test à neutraliser.
+
+## Session 9 — Outils de tuning : simulation.json + SimReport
+- Fait : les 14 constantes de gameplay recensées dans le plan (chance de
+  feu, densités, faim, vitesse, recherche de nourriture, seuils de
+  génération de terrain) sortent de World.cs vers data/simulation.json
+  (SimulationConfig.cs, désérialisation directe avec propriétés
+  `required` — une valeur manquante fait échouer le chargement plutôt
+  que de silencieusement valoir 0). MaxSearchRadius n'étant plus une
+  constante de compilation, les buffers de recherche BFS déménagent des
+  field initializers vers le corps du constructeur (alloués depuis
+  config.MaxFoodSearchRadius). Les tests lisent désormais la même config
+  que World au lieu de recalculer des tick-counts à la main : nouveau
+  helper TicksUntilHungerThreshold(config, seuil) dans AgentTests.cs,
+  qui remplace les litéraux 1000/1040/1080/700 — un futur tuning dans le
+  JSON n'imposera plus de retoucher les tests. Validation des ids
+  dupliqués ajoutée à TerrainCatalog/VegetationCatalog (throw explicite
+  au lieu d'un écrasement silencieux). SpawnAgents borné (×10 tentatives
+  max), nouveau flag AgentSpawnCapped (pas de log direct — /Simulation
+  n'écrit jamais sur la console, c'est à l'appelant de le faire).
+  World.TickIntervalSeconds (const public) remplace la constante locale
+  dupliquée de WorldRenderer.cs — source unique du pas de temps.
+  Nouveau projet /Tools/SimReport (console, référence /Simulation
+  uniquement, PEUT utiliser System.IO/Console contrairement à
+  /Simulation) : CLI --seed/--ticks/--size, échantillonne population +
+  buissons/arbres + tuiles herbe/cendre (compteurs GrassTileCount/
+  AshTileCount entretenus en O(1), jamais un balayage par tick) sur ~20
+  points, imprime un tableau texte compact + morts par cause
+  (DeathCause, une seule valeur Hunger pour l'instant — compteur de
+  diagnostic, hors Hash() comme précisé) + hash final. Piège de glob
+  Godot anticipé : <Compile Remove="Tools/**" /> ajouté avant même de
+  lancer un premier build, vérifié par dotnet msbuild -getItem:Compile
+  (seuls les 3 scripts existants, rien de Tools/Simulation/Tests). 21
+  tests toujours verts, y compris le golden-hash — **hash inchangé**,
+  confirme qu'aucun comportement n'a bougé pendant l'extraction.
+  SimReport --seed 42 --ticks 50000 --size 512 : 0,14s, population
+  stable à 199 (zéro mort — carte riche en 11537 buissons + 1570 arbres,
+  la végétation sature sa capacité de 13107 dès le tick 2500 puis se
+  fige, aucune régénération de tuile n'existe encore côté herbe/cendre).
+  Comportement cohérent avec l'absence de reproduction : sans naissance
+  ni mort significative, la population ne peut que rester plate ou
+  descendre, jamais monter.
+- Cassé : rien de connu, build + tests verts sur les 4 projets
+  (Simulation, Tests, SimReport, WorldSim).
+- Prochaine fois : reproduction régulée par la capacité de charge —
+  c'est le système qui va enfin faire bouger cette courbe de
+  population plate. Non vérifié par moi : rien de nouveau côté F5 cette
+  session (aucun changement de gameplay), simulation.json chargé
+  correctement par WorldRenderer à confirmer quand même à l'ouverture.

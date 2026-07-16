@@ -6,6 +6,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Simulation", "Simulation\Si
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tests", "Tests\Tests.csproj", "{0BECAA23-05A4-40E7-810E-1470A3AF4E16}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{F086F677-C15F-4BF6-8072-B1B0767B1745}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimReport", "Tools\SimReport\SimReport.csproj", "{93E263E8-6EF6-4216-A16C-355E87A5F30F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -31,5 +35,14 @@ Global
 		{0BECAA23-05A4-40E7-810E-1470A3AF4E16}.ExportDebug|Any CPU.Build.0 = Debug|Any CPU
 		{0BECAA23-05A4-40E7-810E-1470A3AF4E16}.ExportRelease|Any CPU.ActiveCfg = Debug|Any CPU
 		{0BECAA23-05A4-40E7-810E-1470A3AF4E16}.ExportRelease|Any CPU.Build.0 = Debug|Any CPU
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F}.ExportDebug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F}.ExportDebug|Any CPU.Build.0 = Debug|Any CPU
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F}.ExportRelease|Any CPU.ActiveCfg = Debug|Any CPU
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F}.ExportRelease|Any CPU.Build.0 = Debug|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{93E263E8-6EF6-4216-A16C-355E87A5F30F} = {F086F677-C15F-4BF6-8072-B1B0767B1745}
 	EndGlobalSection
 EndGlobal
