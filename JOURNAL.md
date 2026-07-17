@@ -494,3 +494,83 @@
   toute calibration fine de l'équilibre nourriture/population faite
   maintenant serait invalidée, donc pas touché (bushDensity,
   MaxFoodSearchRadius, formule de reproduction).
+
+## Session 15 — Échelles de temps de la végétation
+- Fait : la végétation partageait la bande temporelle de la faim
+  (repousse 30s ≈ faim→cherche 20s ≈ faim→mort 34s) et
+  `bushDensity=0.3` (rustine s13, 66% de l'herbe) tuait toute
+  compétition spatiale et la sonde feu (1,7% détruite). Changement
+  couplé par conservation explicite (production = repousse × valeur
+  nutritive doit rester constante) : délai de repousse ×10 (900→9000
+  ticks), maturation buisson ×10 (5→50 stades = 50s), foodValue ×10
+  (160→1600, compense exactement) — `HarvestAmountPerTick` inchangé,
+  un buisson tient maintenant plusieurs repas au lieu d'être une
+  bouchée. Densité balayée empiriquement (0,05/0,10/0,15/0,20 sur 2M
+  ticks + feu) : 0,05 et 0,10 → extinction totale de la population
+  (effondrement de capacité de charge, pas un problème de cécité) ;
+  0,15 survit de justesse (creux à 1 agent) ; **0,20 retenue** (creux
+  jamais sous ~1950 sur le balayage initial, clusterisation ~20-30
+  contre 39 à 0,05). Arbres : durée de vie ×10 (600000±200000 ticks,
+  5h33±1h51) + taux de diffusion/spontané séparés des buissons pour la
+  première fois (`TreeSpreadChance`/`TreeSpontaneousChance`) —
+  premier calibrage à 10x plus bas que les buissons est resté saturé
+  au plafond (la diffusion locale croît multiplicativement avec la
+  population existante, un ratio proportionnel au taux buisson ne
+  suffit pas) ; recalibré en visant l'équilibre population désiré
+  plutôt qu'un ratio fixe → `0.00001`/`0.000002`, confirmé non saturé
+  (fluctuation réelle observée 2968→3875 sur un run). Bug découvert en
+  implémentant : un monde neuf démarrait sans aucun buisson mûr, et à
+  50s de maturation, TOUTE la population initiale mourait de faim (34s)
+  avant qu'un seul buisson n'ait eu le temps de pousser. Fix :
+  `SeedInitialVegetation()`, appelée en fin de constructeur, plante
+  directement à maturité jusqu'à la capacité de chaque tableau (même
+  balayage tournant déterministe que la germination spontanée) — un
+  monde généré démarre maintenant "déjà établi", comme la génération de
+  terrain elle-même, pas une graine. Conséquence directe : la
+  colonisation initiale (~83s avant cette session) est maintenant
+  **instantanée** (le monde est mûr dès le tick 0) — plus un
+  transitoire de démarrage à observer, un état de départ assumé.
+  `AgentCapacityMultiplier` relevé 40→80 après avoir observé un pic à
+  7959 dangereusement proche de l'ancien plafond 7960 pendant le
+  balayage de densité.
+  Effet de bord de `SeedInitialVegetation` sur les tests : plusieurs
+  tests construisaient un petit monde puis plaçaient de la végétation
+  au cas par cas (`ForceSpawnVegetation`) ou supposaient une carte
+  vierge/sans nourriture — désormais fausse dès la construction. Deux
+  fixes : `ForceSpawnVegetation` libère maintenant un slot arbitraire
+  du même type si le tableau (capacité fixe, zéro marge) est déjà
+  plein au lieu de planter hors limites ; nouveau `ClearAllVegetation()`
+  (seam de test) appelé dans les scénarios qui exigent une carte
+  réellement vierge (`MakeFoodless`, couples de reproduction isolés,
+  désert contrôlé pour le test du gradient).
+  Mesures finales (2M ticks, seeds 42/7, feu interval=20000 radius=6,
+  densité 0,20) : creux jamais sous 756 (seed 7) / 1239 (seed 42) —
+  bien au-dessus du plancher de sécurité (50) ; morts aveugles
+  (`BlindWander`) à 6,4% (seed 42) / 7,2% (seed 7), contre un plafond
+  resserré 20%→15% ; feu détruit 4,4%/5,4% du pic de végétation contre
+  1,7% avant cette session ; clusterisation 23,6/20,7 (en hausse vs
+  s14d, attendu — paysage en patches, plus un tapis) ; morts en transit
+  vers une source connue (`FollowingGradient`) 40,0%/41,2% — budget de
+  faim toujours dominé par les trouvailles directes (BFS) et le
+  gradient, pas par l'errance aveugle.
+- Cassé : golden-hash (nouvelles constantes + nouveaux champs config
+  arbre + `SeedInitialVegetation`), recalculé et signalé.
+  `Vegetation_SpatialDistribution_IsBalanced` (pré-existante, pas dans
+  le périmètre des tests s15) : tolérance élargie 0,5x-1,5x → 0,15x-3x
+  de la moyenne — la clusterisation accrue est un objectif assumé de
+  cette session (paysage lisible), pas une régression à corriger.
+  `Trees_StabilizeOverLongRun` : borne resserrée 0,8x-1,25x entre 1M et
+  2M ticks retirée (les arbres fluctuent réellement maintenant) au
+  profit d'un plafond de saturation (<90% capacité) qui fusionne avec
+  le rôle de `Trees_ArrayIsNotSaturated` du plan, évitant un doublon de
+  run 2M ticks. 49 tests verts (suite complète, y compris les runs
+  longs).
+- Prochaine fois : `Vegetation_SpatialDistribution_IsBalanced` reste
+  un test à tolérance large plutôt qu'une vraie mesure de qualité de
+  paysage — si la lisibilité du paysage redevient un sujet actif
+  (rendu réel), le remplacer par une mesure plus directe (ex. taille
+  des patches) plutôt que d'élargir encore la tolérance. Foyers
+  (prochaine session) : `SeedInitialVegetation` change la donne pour la
+  distribution spatiale de départ — à revérifier une fois les foyers
+  en place, ils vont interagir avec un monde déjà mûr dès le tick 0,
+  pas un monde qui se peuple progressivement.

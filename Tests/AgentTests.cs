@@ -48,6 +48,11 @@ public class AgentTests
                 world.SetTerrainId(x, y, sand);
             }
         }
+
+        // SeedInitialVegetation (s15) plante à la construction, avant
+        // que ce helper ne recouvre la carte de sable -- sans ce clear,
+        // les buissons déjà posés survivent au changement de terrain.
+        world.ClearAllVegetation();
     }
 
     [Fact]
@@ -407,6 +412,13 @@ public class AgentTests
             }
         }
 
+        // SeedInitialVegetation (s15) plante à la construction, avant
+        // le passage en herbe ci-dessus -- sans ce clear, des buissons
+        // déjà mûrs ailleurs sur la carte pourraient nourrir l'agent
+        // sans jamais solliciter le gradient, ce que ce test vérifie
+        // justement.
+        world.ClearAllVegetation();
+
         // Buisson mûr à 50 tuiles -- au-delà du BFS (±16, MaxFoodSearchRadius)
         // ET du désert de rayon ~40 diagnostiqué en s14b.
         vegetation.TryGetId("bush", out byte bushType);
@@ -463,7 +475,7 @@ public class AgentTests
         int blindDeaths = seekOutcomeHistogram[SeekOutcome.BlindWander];
 
         double blindFraction = (double)blindDeaths / totalHungerDeaths;
-        Assert.True(blindFraction < 0.20,
+        Assert.True(blindFraction < 0.15,
             $"{blindFraction:P0} des morts de faim n'avaient aucun signal (ni BFS ni gradient) à leur dernier cycle de décision -- vraie cécité");
     }
 

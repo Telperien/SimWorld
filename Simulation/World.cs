@@ -299,6 +299,60 @@ public sealed class World
 
         _vegetationClearedTick = new int[size * size];
         Array.Fill(_vegetationClearedTick, NeverClearedSentinel);
+
+        SeedInitialVegetation();
+    }
+
+    // Un monde fraîchement généré doit démarrer avec un écosystème déjà
+    // établi, pas une graine (session 15) : depuis que la maturation
+    // d'un buisson prend ~50s (échelle de temps ralentie, cf. plan) et
+    // que la mort de faim survient à ~34s, un monde vierge condamnait
+    // toute la population initiale avant qu'un seul buisson n'ait mûri.
+    // Même esprit que la génération de terrain elle-même (déjà
+    // "complète" au démarrage, jamais générée par accrétion) :
+    // pré-plante directement à maturité, jusqu'à la capacité de
+    // chaque tableau, via le même balayage tournant que la
+    // germination spontanée (déterministe, pas de biais spatial).
+    private void SeedInitialVegetation()
+    {
+        int bushMatureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
+        int treeMatureStage = _vegetationCatalog.Get(_treeTypeId).MatureStage;
+        int tileCount = _terrain.Length;
+        int startIndex = (int)(_rngVegetation.NextDouble() * tileCount);
+
+        for (int offset = 0; offset < tileCount; offset++)
+        {
+            if (BushCount >= _bushes.Length && TreeCount >= _trees.Length)
+            {
+                return;
+            }
+
+            int index = (startIndex + offset) % tileCount;
+            if (_terrain[index] != _grassId || _bushIndexAt[index] != -1 || _treeIndexAt[index] != -1)
+            {
+                continue;
+            }
+
+            int x = index % Size;
+            int y = index / Size;
+
+            // Remplit directement jusqu'à la capacité (pas un tirage au
+            // taux de germination spontanée, bien trop bas pour amorcer
+            // tout un monde -- ce taux reste le filet de sécurité pour
+            // une repousse EN COURS DE PARTIE, pas pour le démarrage).
+            // La pression de récolte ramènera naturellement la
+            // population vers son équilibre réel au fil du temps.
+            if (BushCount < _bushes.Length)
+            {
+                SpawnBush(x, y);
+                _bushes[BushCount - 1].Stage = (byte)bushMatureStage;
+            }
+            else if (TreeCount < _trees.Length)
+            {
+                SpawnTree(x, y);
+                _trees[TreeCount - 1].Stage = (byte)treeMatureStage;
+            }
+        }
     }
 
     public byte GetTerrainId(int x, int y) => _terrain[y * Size + x];
@@ -378,6 +432,22 @@ public sealed class World
     public void ForceSpawnVegetation(int x, int y, byte type, byte stage)
     {
         ClearVegetationAt(x, y);
+
+        // "Force" doit garantir la place même si le tableau (capacité =
+        // densité x taille, zéro marge) est déjà plein -- depuis
+        // SeedInitialVegetation (s15), c'est le cas dès la construction
+        // pour toute tuile qui n'était pas encore de l'herbe à ce
+        // moment-là. On libère un slot arbitraire (le premier) du même
+        // type plutôt que de planter hors limites.
+        if (type == _bushTypeId && BushCount >= _bushes.Length)
+        {
+            RemoveBushAt(0);
+        }
+        else if (type == _treeTypeId && TreeCount >= _trees.Length)
+        {
+            RemoveTreeAt(0);
+        }
+
         SpawnVegetationOfType(x, y, type);
 
         int index = y * Size + x;
@@ -445,6 +515,24 @@ public sealed class World
         if (treeSlot != -1)
         {
             RemoveTreeAt(treeSlot);
+        }
+    }
+
+    // Seam de test : vide toute la végétation posée par
+    // SeedInitialVegetation (s15) -- nécessaire pour les scénarios qui
+    // exigent une carte réellement sans nourriture (RemoveBushAt/
+    // RemoveTreeAt en boucle plutôt qu'un simple Clear() du tableau, le
+    // swap-with-last laisse toujours le tableau dans un état valide).
+    public void ClearAllVegetation()
+    {
+        while (BushCount > 0)
+        {
+            RemoveBushAt(BushCount - 1);
+        }
+
+        while (TreeCount > 0)
+        {
+            RemoveTreeAt(TreeCount - 1);
         }
     }
 
@@ -1965,7 +2053,7 @@ public sealed class World
             return;
         }
 
-        if (_rngVegetation.NextDouble() >= _config.VegetationSpreadChance)
+        if (_rngVegetation.NextDouble() >= _config.TreeSpreadChance)
         {
             return;
         }
@@ -2010,7 +2098,7 @@ public sealed class World
             {
                 SpawnBush(x, y);
             }
-            else if (TreeCount < _trees.Length && _rngVegetation.NextDouble() < _config.VegetationSpontaneousChance)
+            else if (TreeCount < _trees.Length && _rngVegetation.NextDouble() < _config.TreeSpontaneousChance)
             {
                 SpawnTree(x, y);
             }

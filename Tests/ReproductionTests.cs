@@ -37,6 +37,13 @@ public class ReproductionTests
     {
         var world = new World(seed, size: 128, catalog, vegetation, species, config);
 
+        // SeedInitialVegetation (s15) plante un monde déjà établi à la
+        // construction -- sans ce clear, la population ambiante trouve
+        // à manger partout et redevient éligible à la reproduction bien
+        // avant la fin de la fenêtre de test, ce que ces tests veulent
+        // justement exclure (cf. neutralisation ci-dessous).
+        world.ClearAllVegetation();
+
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("bush", out byte bushType);
         int matureStage = vegetation.Get(bushType).MatureStage;

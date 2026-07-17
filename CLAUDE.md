@@ -45,6 +45,12 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - Corollaire : aucune ressource ne doit pouvoir disparaître LOCALEMENT
   sans pouvoir revenir LOCALEMENT. Une régénération globale sur une
   déplétion locale crée des déserts permanents (bug des buissons, s10-13).
+- Séparation des échelles de temps. Chaque couche doit être au moins
+  un ordre de grandeur plus lente que celle du dessous : mouvement
+  (secondes) < cycle de vie (minutes) < paysage (dizaines de minutes)
+  < civilisations (heures). Deux mécaniques dans la même bande
+  temporelle se perçoivent comme du bruit : le joueur ne lit plus la
+  causalité.
 
 ## Déterminisme (critique)
 - RNG maison seedé (Xorshift). JAMAIS Random.Shared, DateTime.Now, Stopwatch.

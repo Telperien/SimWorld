@@ -252,7 +252,11 @@ public class VegetationTests
 
         // Aucune source de graines nulle part sur la carte : seule la
         // germination spontanée (piège symétrique, s13) peut faire
-        // repartir la végétation depuis zéro.
+        // repartir la végétation depuis zéro. SeedInitialVegetation
+        // (s15) plante à la construction, avant le passage en herbe
+        // ci-dessus -- on rase explicitement pour retrouver la
+        // prémisse "région entièrement vidée" que ce test vérifie.
+        world.ClearAllVegetation();
         Assert.Equal(0, world.VegetationCount);
 
         for (int i = 0; i < config.VegetationTickInterval * 10; i++)
@@ -318,9 +322,16 @@ public class VegetationTests
         }
 
         double averageRatio = (ratios[0] + ratios[1] + ratios[2] + ratios[3]) / 4.0;
+        // Tolérance élargie en s15 (0,5x-1,5x -> 0,15x-3x) : le retrait
+        // de la rustine bushDensity=0.3 augmente délibérément la
+        // clusterisation (paysage lisible en patches, plus un tapis
+        // uniforme -- cf. plan s15, point 6 "clusterisation WILL rise,
+        // expected"). Ce test garde son rôle d'origine -- détecter un
+        // quadrant qui dérive vers zéro (bug de repousse directionnel,
+        // diagnostic s12) -- sans pénaliser l'irrégularité voulue.
         foreach (double ratio in ratios)
         {
-            Assert.InRange(ratio, averageRatio * 0.5, averageRatio * 1.5);
+            Assert.InRange(ratio, averageRatio * 0.15, averageRatio * 3.0);
         }
     }
 
@@ -401,6 +412,7 @@ public class VegetationTests
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         vegetation.TryGetId("tree", out byte treeType);
+        int capacity = (int)(config.TreeDensity * 512 * 512);
 
         for (int i = 0; i < 1_000_000; i++)
         {
@@ -414,12 +426,83 @@ public class VegetationTests
         }
         int treeCountFinal = world.CountVegetationOfType(treeType);
 
-        // Un vrai plateau (à son plafond de capacité ou en dessous, peu
-        // importe) : ni extinction (le cliquet inversé introduit par le
-        // fix de s11, cause racine = tableau partagé -- corrigé cette
-        // session par la séparation bush/tree), ni dérive continue dans
-        // un sens ou l'autre entre 1M et 2M ticks.
-        Assert.True(treeCountFinal > 20, $"arbres proches de l'extinction : {treeCountFinal}");
-        Assert.InRange(treeCountFinal, treeCountMidway * 0.8, treeCountMidway * 1.25);
+        // Ni extinction (le cliquet inversé introduit par le fix de s11,
+        // cause racine = tableau partagé -- corrigé en s13 par la
+        // séparation bush/tree), ni saturation permanente (la vraie
+        // durée de vie, allongée en s15, doit produire une dynamique
+        // observable -- une population figée au plafond signifierait
+        // qu'elle tourne encore dans le vide). Pas de borne étroite
+        // entre 1M et 2M ticks : la fluctuation réelle (ex. 2968->3875,
+        // seed 42) est le comportement voulu depuis s15, pas un plateau.
+        Assert.True(treeCountMidway > 20, $"arbres proches de l'extinction (mi-parcours) : {treeCountMidway}");
+        Assert.True(treeCountFinal > 20, $"arbres proches de l'extinction (fin) : {treeCountFinal}");
+        Assert.True(treeCountMidway < capacity * 0.9, $"arbres saturés au plafond (mi-parcours) : {treeCountMidway}/{capacity}");
+        Assert.True(treeCountFinal < capacity * 0.9, $"arbres saturés au plafond (fin) : {treeCountFinal}/{capacity}");
+    }
+
+    [Fact]
+    public void Vegetation_TimeScale_IsSlowerThanHungerCycle()
+    {
+        var config = LoadSimulationConfig();
+
+        // Décision de design de s15 : la végétation doit être au moins
+        // un ordre de grandeur plus lente que le cycle de faim, sinon
+        // les deux mécaniques se perçoivent comme du bruit (cf.
+        // CLAUDE.md, "Séparation des échelles de temps"). Référence la
+        // plus stricte des deux bandes citées : faim -> CHERCHE (pas
+        // faim -> mort, plus tardive donc moins exigeante).
+        long hungerSeekTicks = (long)config.HungerSeekThreshold * 4;
+        Assert.True(config.VegetationRegrowthDelayTicks >= 10 * hungerSeekTicks,
+            $"délai de repousse ({config.VegetationRegrowthDelayTicks} ticks) pas assez lent face au cycle de faim ({hungerSeekTicks} ticks)");
+    }
+
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Fire_DestroysSignificantVegetation(int seed)
+    {
+        var catalog = LoadCatalog();
+        var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
+        var config = LoadSimulationConfig();
+        var world = new World(seed, size: 512, catalog, vegetation, species, config);
+
+        vegetation.TryGetId("bush", out byte bushType);
+        vegetation.TryGetId("tree", out byte treeType);
+
+        int peakVegetation = 0;
+        var rng = new Rng((ulong)seed * 7919 + 3);
+        const int fireInterval = 20000;
+        const int fireRadius = 6;
+
+        for (int i = 0; i < 2_000_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+
+            if (i % fireInterval == 0)
+            {
+                int fireX = (int)(rng.NextDouble() * 512);
+                int fireY = (int)(rng.NextDouble() * 512);
+                world.Execute(new SpawnFire(fireX, fireY, fireRadius));
+            }
+
+            if (i % 1000 == 0)
+            {
+                int current = world.CountVegetationOfType(bushType) + world.CountVegetationOfType(treeType);
+                peakVegetation = Math.Max(peakVegetation, current);
+            }
+        }
+
+        // Rustine s13 (bushDensity=0.3) retirée en s15 : le feu doit
+        // redevenir un signal significatif (avant s15 : 1,7% du pic sur
+        // toute la durée). Mesuré empiriquement en s15 avec la densité
+        // 0.2 retenue : 2,6% (seed 7) à 5,1% (seed 42) -- la variance
+        // vient de l'emplacement des feux relatif au paysage généré par
+        // chaque seed, pas d'un aléa de run à run (déterministe). Seuil
+        // pris sous le minimum mesuré, nettement au-dessus du 1,7%
+        // historique.
+        double lossFraction = (double)world.VegetationLostToFire / peakVegetation;
+        Assert.True(lossFraction > 0.02,
+            $"seulement {lossFraction:P1} de la végétation (pic {peakVegetation}) détruite par le feu -- le feu redevient-il vraiment significatif ?");
     }
 }

@@ -25,6 +25,8 @@ public sealed record SimulationConfig
     public required byte SeekFailureCooldownThinkTicks { get; init; }
     public required double VegetationSpreadChance { get; init; }
     public required double VegetationSpontaneousChance { get; init; }
+    public required double TreeSpreadChance { get; init; }
+    public required double TreeSpontaneousChance { get; init; }
     public required byte WanderPersistenceTicks { get; init; }
     public required double WanderTurnChance { get; init; }
     public required int MateSearchRadius { get; init; }
