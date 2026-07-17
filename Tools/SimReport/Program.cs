@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq;
 using Simulation;
 
 int seed = 42;
@@ -108,6 +109,24 @@ Sample(0);
 int sampleInterval = Math.Max(1, ticks / 20);
 var stopwatch = Stopwatch.StartNew();
 
+// Points de controle pour l'evolution de la connectivite d'herbe
+// (session 17b, partie 1.2) : uniquement les points demandes qui
+// tombent dans la duree reelle du run, plus toujours le tick final.
+var connectivityCheckpointTicks = new List<int> { 0, 500_000, 1_000_000, 2_000_000 }
+    .Where(t => t <= ticks)
+    .Distinct()
+    .OrderBy(t => t)
+    .ToList();
+if (connectivityCheckpointTicks.Count == 0 || connectivityCheckpointTicks[^1] != ticks)
+{
+    connectivityCheckpointTicks.Add(ticks);
+}
+var connectivitySamples = new List<(int Tick, GrassConnectivityReport Report)>();
+if (connectivityCheckpointTicks.Contains(0))
+{
+    connectivitySamples.Add((0, world.AnalyzeGrassConnectivity()));
+}
+
 for (int i = 0; i < ticks; i++)
 {
     if (fire && i % fireInterval == 0)
@@ -122,6 +141,11 @@ for (int i = 0; i < ticks; i++)
     if ((i + 1) % sampleInterval == 0 || i == ticks - 1)
     {
         Sample(i + 1);
+    }
+
+    if (connectivityCheckpointTicks.Contains(i + 1))
+    {
+        connectivitySamples.Add((i + 1, world.AnalyzeGrassConnectivity()));
     }
 }
 
@@ -237,6 +261,48 @@ if (clusterSamples > 0)
 {
     Console.WriteLine($"Clusterisation -- distance moyenne au buisson mur le plus proche pour {clusterSamples} points d'herbe tires au hasard : {clusterDistanceSum / clusterSamples:F2}");
 }
+
+// --- Diagnostic terrain/vegetation/feu (session 17b, partie 1) ---
+// Hypothese : chaque lac ceinture de sable isole l'herbe en ilots
+// (sable/eau/pierre/cendre jamais inflammables ni porteurs de
+// vegetation) -- chacun son propre coupe-feu, chacun sa propre
+// disponibilite de graines locales pour la repousse.
+Console.WriteLine();
+Console.WriteLine("--- Connectivite de l'herbe (session 17b) ---");
+foreach (var (tick, report) in connectivitySamples)
+{
+    Console.WriteLine($"  tick {tick,8} : {report.PatchCount,5} poches (tailles min={report.MinSize} median={report.MedianSize} max={report.MaxSize}), " +
+        $"{report.PatchesWithNoBush,5} sans aucun buisson");
+}
+
+var lastConnectivity = connectivitySamples[^1].Report;
+Console.WriteLine();
+Console.WriteLine("Poches sans buisson par quadrant (dernier point de controle), a comparer au deficit de vegetation par quadrant ci-dessus :");
+Console.WriteLine($"  HG={lastConnectivity.PatchesWithNoBushByQuadrant[0]}/{lastConnectivity.PatchCountByQuadrant[0]} " +
+    $"HD={lastConnectivity.PatchesWithNoBushByQuadrant[1]}/{lastConnectivity.PatchCountByQuadrant[1]} " +
+    $"BG={lastConnectivity.PatchesWithNoBushByQuadrant[2]}/{lastConnectivity.PatchCountByQuadrant[2]} " +
+    $"BD={lastConnectivity.PatchesWithNoBushByQuadrant[3]}/{lastConnectivity.PatchCountByQuadrant[3]}  (poches sans buisson / total poches)");
+
+Console.WriteLine();
+Console.WriteLine("--- Feu : taille d'evenement et cause d'extinction (session 17b) ---");
+Console.WriteLine($"  Evenements termines: {world.FireEventCount}  Taille moyenne: {world.AverageFireEventSize:F1} tuiles  Taille max: {world.MaxFireEventSize} tuiles");
+int fireBlockTotal = world.FireBlockedByTerrainCount + world.FireFizzledCount;
+if (fireBlockTotal > 0)
+{
+    double blockedPct = 100.0 * world.FireBlockedByTerrainCount / fireBlockTotal;
+    double fizzledPct = 100.0 * world.FireFizzledCount / fireBlockTotal;
+    Console.WriteLine($"  Tentatives de propagation bloquees : {world.FireBlockedByTerrainCount} par terrain non-inflammable ({blockedPct:F1}%), " +
+        $"{world.FireFizzledCount} par tirage rate sur terrain inflammable ({fizzledPct:F1}%)");
+}
+
+Console.WriteLine();
+Console.WriteLine("--- Couplage arbre/buisson et repousse cendre (session 17b) ---");
+double treeShareOfGrass = world.GrassTileCount > 0 ? 100.0 * world.TreeCount / world.GrassTileCount : 0.0;
+Console.WriteLine($"  Tuiles d'herbe occupees par un arbre (indisponibles pour un buisson) : {world.TreeCount} / {world.GrassTileCount} herbe ({treeShareOfGrass:F1}%)");
+double ashRecoveryEligibleTicks = config.AshToGrassChance > 0 ? 1.0 / config.AshToGrassChance : double.PositiveInfinity;
+double ashRecoveryRealTicks = ashRecoveryEligibleTicks * config.VegetationTickInterval;
+Console.WriteLine($"  Guerison cendre->herbe attendue : ~{ashRecoveryRealTicks:F0} ticks reels ({ashRecoveryRealTicks / 30.0:F1}s a 30Hz), " +
+    $"a comparer aux bandes temporelles s15 (repousse buisson 9000 ticks/300s, maturation arbre 900 ticks/30s)");
 
 Console.WriteLine();
 Console.WriteLine($"Repas cumules: {world.MealsEaten}");

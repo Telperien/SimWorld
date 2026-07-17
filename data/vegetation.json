@@ -1,4 +1,4 @@
 {
-  "bush": { "id": 0, "color": "#3f7d32", "matureStage": 50, "flammable": false, "foodValue": 1600, "lifespanTicks": 0,      "lifespanVarianceTicks": 0 },
+  "bush": { "id": 0, "color": "#6fae52", "matureColor": "#2f6b1f", "matureStage": 50, "flammable": false, "foodValue": 1600, "lifespanTicks": 0,      "lifespanVarianceTicks": 0 },
   "tree": { "id": 1, "color": "#2d5a27", "matureStage": 30, "flammable": true,  "foodValue": 0,    "lifespanTicks": 600000, "lifespanVarianceTicks": 200000 }
 }

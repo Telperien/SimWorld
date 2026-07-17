@@ -574,3 +574,133 @@
   distribution spatiale de départ — à revérifier une fois les foyers
   en place, ils vont interagir avec un monde déjà mûr dès le tick 0,
   pas un monde qui se peuple progressivement.
+
+## Session 17b — Diagnostic terrain + lisibilité visuelle
+
+### Partie 1 — Diagnostic (mesure, zéro fix)
+- **Connectivité de l'herbe confirmée** : `AnalyzeGrassConnectivity()`
+  (flood-fill) trouve **12 poches** sur seed 42 (tailles 158 à 75063,
+  médiane 2037) et **8 poches** sur seed 7 (158 à 115921, médiane
+  1258) — l'hypothèse de départ tient : chaque lac ceinturé de sable
+  isole bien l'herbe en îlots. Nombre de poches **stable sur les 2M
+  ticks complets** (12/12/12/12 et 8/8/8/8) : la topologie ne change
+  jamais, seul le contenu (buisson ou non) fluctue.
+- **Pas de cliquet confirmé** : poches sans aucun buisson 6→4→3→6
+  (seed 42) et 5→3→4→4 (seed 7) sur les 4 points de contrôle — ça
+  fluctue, ça ne dérive PAS vers un maximum croissant. La règle
+  CLAUDE.md ("aucune ressource ne doit disparaître localement sans
+  pouvoir revenir localement") tient, contrairement à la crainte de
+  départ.
+- **Corrélation quadrant** : mitigée, comme déjà observé en s14d.
+  Seed 42 : HD a le moins de végétation (7424) ET le plus haut ratio
+  de poches sans buisson (3/5). Seed 7 : BD a le moins de végétation
+  (7055) mais 0/1 poche sans buisson — son déficit vient de la TAILLE
+  des poches locales, pas de leur état, donc pas une corrélation
+  propre et généralisable.
+- **Feu** : ~62-64 événements terminés sur 2M ticks (100 tentatives
+  d'allumage), taille moyenne **~1120-1266 tuiles**, max ~4200-4260 —
+  le feu brûle bel et bien significativement QUAND il prend, mais
+  jamais au-delà de sa poche (îlot). Sur toutes les tentatives de
+  propagation ratées : **~49% bloquées par du terrain non-inflammable
+  (coupe-feu), ~51% par un tirage de probabilité raté** — le coupe-feu
+  naturel est un contributeur réel et quasi aussi important que le
+  hasard pur.
+- **Couplage arbre/buisson** : confirmé mais modeste — les arbres
+  n'occupent que **~2,9% de l'herbe totale** (3396-3548 tuiles sur
+  118611-122823) une fois stabilisés (s15). Le couplage capacité
+  buisson/arbre existe (même tuile, un seul occupant) mais n'explique
+  qu'une fraction marginale de la disponibilité de buisson.
+- **Cendre→herbe trop rapide** : confirmé et quantifié — guérison en
+  **~1500 ticks (50s)**, soit ~6× plus rapide que le délai de repousse
+  du buisson (9000 ticks/300s, s15) et du même ordre que la
+  maturation de l'arbre (900 ticks/30s). Les cicatrices de brûlure
+  guérissent bien trop vite pour rester visibles à l'échelle de temps
+  du reste de l'écosystème post-s15.
+- Golden-hash identique à la fin de s15 sur les deux seeds
+  (`0xD0D00C1F590D2E9E` / `0x6AF6E2CBDBD9C246`) : confirme que toute
+  l'instrumentation de cette session est bien un pur diagnostic, zéro
+  changement de comportement.
+
+### Partie 2 — Lignes droites : identifiées, pas devinées
+- Nouvel outil `Tools/RenderDump` (reproduit exactement les pixels de
+  `WorldRenderer.Redraw()`, écrit un vrai PNG). Le PNG révèle une
+  **bande horizontale sombre bien réelle** (visible aussi au F5) —
+  **root-causée** : `SeedInitialVegetation` (s15) sème en un seul
+  balayage raster (ordre `y*Size+x`) tous les buissons jusqu'à
+  capacité, PUIS continue le MÊME balayage en ne plantant plus que des
+  arbres jusqu'à LEUR capacité. Comme la capacité arbre (5242) est
+  bien plus petite que la capacité buisson (52428), la portion
+  "arbres seulement" du balayage est une bande étroite et contiguë —
+  confirmé par mesure directe : les lignes y=410-439 (seed 42) sont
+  quasi 100% arbres (0-163 buissons contre 1588-1867 arbres par
+  bande de 10 lignes, alors que le reste de la carte est
+  majoritairement buisson). C'est aussi la cause directe de "la forêt
+  pousse toujours aux mêmes endroits" : tous les arbres naissent dans
+  cette bande unique, et les taux de diffusion/spontané (s15,
+  volontairement très bas pour éviter la saturation) ne les font
+  quasiment jamais apparaître ailleurs ensuite.
+- **Ligne verticale à ~3/4 largeur : NON expliquée.** Le RLE des ids
+  de terrain bruts à x=384 est propre (transitions organiques
+  normales), et le balayage en densité bush/tree PAR COLONNE ne montre
+  aucune bande "arbres seulement" analogue à la ligne horizontale — la
+  cause n'est pas la même que ci-dessus. Piste éliminée par la revue
+  de code initiale : aucun découpage par bloc/quadrant nulle part en
+  C# (Simulation ou Game). Cause réelle non identifiée cette session —
+  signalée pour investigation ultérieure (potentiellement côté
+  pipeline Godot, non testable sans lancer le jeu).
+- **Quadrant bas-gauche plus clair** : hypothèse plausible mais non
+  confirmée — pourrait s'expliquer par une plus faible proportion
+  d'arbres (plus sombres que l'herbe/le buisson) dans ce quadrant,
+  mais pas vérifié précisément. À confirmer visuellement au F5.
+
+### Partie 3 — Sprites procéduraux (livrable)
+- Nouveau `Simulation/SpriteGenerator.cs` (pur C#, aucun `using
+  Godot`) : silhouette humanoïde 6x8 (facing dérivé par miroir exact
+  du buffer canonique, bras asymétrique pour que le miroir se voie
+  réellement), buisson en disque irrégulier 4x4 (jeune, pâle) / 6x6
+  (mûr, plus sombre + 1-2 pixels de baie) — **distinction visuelle
+  immédiate jeune/mûr, forme ET couleur**, arbre tronc+couronne
+  8x8-14x14 dont la taille suit `Stage/MatureStage` en continu. Toutes
+  les formes utilisent un test de distance (`Sqrt` autorisé) avec une
+  bande de bord bruitée par RNG — zéro trigonométrie. Chaque sprite
+  dérive son seed d'une position de tuile ou d'un `Agent.Id` stable
+  (jamais des flux RNG de la simulation).
+- `data/vegetation.json` : buisson gagne `matureColor` (jeune `color`
+  plus pâle qu'avant, mûr nettement plus sombre). Nouveau
+  `data/palette.json` + `Simulation/PaletteCatalog.cs` (préparation
+  multi-race/clan, donnée seule, aucune logique de sélection cette
+  session).
+- Côté rendu (`scripts/`) : `AgentRenderer` utilise la nouvelle
+  silhouette (masque blanc, la teinte d'état FSM existante reste
+  inchangée). Nouveau `scripts/VegetationRenderer.cs` :
+  `MultiMeshInstance2D` par "bucket" (jeune/mûr buisson, 3 paliers de
+  croissance arbre) au lieu de peindre un pixel par plante dans
+  l'image plein-écran à chaque tick (risque de performance réel vu le
+  nombre d'entités désormais en sprites multi-pixels) — même stratégie
+  GPU-instanciée que les agents. `WorldRenderer.Redraw()` ne peint
+  plus que le terrain.
+- Choix SVG vs pixels : pixels procéduraux directs pour les trois
+  catégories — à 4-14px, le SVG rasterisé n'apporte rien et ajoute une
+  dépendance pour zéro gain visuel.
+- 52 tests verts (49 existants + 3 nouveaux `SpriteGeneratorTests`).
+  Golden-hash inchangé (confirmé, cf. Partie 1).
+
+### Hors scope (respecté)
+Aucune correction du terrain, du feu, de la propagation de végétation,
+ni du couplage arbre/buisson cette session — uniquement diagnostic
+(Parties 1-2) et rendu (Partie 3). Les fixes (notamment
+`SeedInitialVegetation` pour la bande d'arbres) se décident ensemble
+la prochaine fois.
+
+### Prochaine fois
+- Fixer `SeedInitialVegetation` pour répartir les arbres sur plusieurs
+  bandes/zones au lieu d'un seul balayage continu (cause root-causée
+  de la bande horizontale ET de "la forêt pousse toujours aux mêmes
+  endroits").
+- Investiguer la ligne verticale à ~3/4 largeur (non expliquée cette
+  session).
+- Décider s'il faut ralentir `AshToGrassChance` pour que les
+  cicatrices de brûlure restent visibles plus longtemps (actuellement
+  ~6× plus rapide que la repousse buisson).
+- Lancement manuel du jeu (F5) pour confirmer visuellement
+  l'amélioration de lisibilité (sprites) et la ligne verticale.

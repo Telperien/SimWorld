@@ -119,6 +119,21 @@ public sealed class World
     private int _birthsLostToUnsafeTile;
     private int _minAliveCountEverObserved = int.MaxValue;
 
+    // Diagnostic feu (session 17b) : taille d'un événement d'incendie
+    // (tuiles enflammées entre le moment où la liste active passe de
+    // vide à non-vide et le moment où elle revient à vide) et cause
+    // d'échec de propagation vers un voisin -- coupe-feu naturel
+    // (terrain non-inflammable, quel que soit le tirage RNG) vs
+    // extinction par probabilité (terrain inflammable mais tirage
+    // raté). Compteurs purs, jamais lus par une décision, exclus de
+    // Hash() comme le reste des diagnostics de cette section.
+    private int _currentFireEventTiles;
+    private long _fireEventSizeSum;
+    private int _fireEventCount;
+    private int _fireEventMaxSize;
+    private int _fireBlockedByTerrainCount;
+    private int _fireFizzledCount;
+
     // --- Diagnostic de mort (session 12) : compteurs cumulés, jamais
     // lus par une décision, exclus de Hash() comme MealsEaten/DeathCause. ---
     // Bornes de buckets : le seuil 33 correspond exactement à _boxSide
@@ -174,6 +189,17 @@ public sealed class World
     public int TilesBurnedCumulative { get; private set; }
 
     public int VegetationLostToFire { get; private set; }
+
+    // Diagnostic feu (session 17b), cf. champs privés ci-dessus.
+    public double AverageFireEventSize => _fireEventCount > 0 ? (double)_fireEventSizeSum / _fireEventCount : 0.0;
+
+    public int FireEventCount => _fireEventCount;
+
+    public int MaxFireEventSize => _fireEventMaxSize;
+
+    public int FireBlockedByTerrainCount => _fireBlockedByTerrainCount;
+
+    public int FireFizzledCount => _fireFizzledCount;
 
     public int BirthsTotal => _birthsTotal;
 
@@ -589,6 +615,95 @@ public sealed class World
         return Math.Sqrt(sumSquaredDiff / cellCount);
     }
 
+    // Diagnostic (session 17b) : connectivité des poches d'herbe --
+    // sable/eau/pierre/cendre ne portent jamais d'herbe (cf.
+    // GenerateTerrain), donc chaque lac ceinturé de sable isole
+    // potentiellement l'herbe autour en îlots : chacun son propre
+    // coupe-feu naturel, et une poche broutée à zéro n'a plus de
+    // graines locales pour la repousse (cf. TrySpreadBushTo, herbe
+    // uniquement). Flood-fill classique sur un buffer visited/queue
+    // frais -- jamais appelée depuis Tick(), allocation acceptée
+    // (même statut que AgentDensityStdDev/DistanceToNearestMatureBush).
+    // Lecture pure, exclue de Hash().
+    public GrassConnectivityReport AnalyzeGrassConnectivity()
+    {
+        var visited = new bool[Size * Size];
+        var queue = new List<int>();
+        var sizes = new List<int>();
+        int half = Size / 2;
+        var patchCountByQuadrant = new int[4];
+        var noBushByQuadrant = new int[4];
+        int patchesWithNoBush = 0;
+
+        for (int startIndex = 0; startIndex < Size * Size; startIndex++)
+        {
+            if (visited[startIndex] || _terrain[startIndex] != _grassId)
+            {
+                continue;
+            }
+
+            queue.Clear();
+            queue.Add(startIndex);
+            visited[startIndex] = true;
+
+            int quadrant = (startIndex % Size < half ? 0 : 1) + (startIndex / Size < half ? 0 : 2);
+            int size = 0;
+            bool hasBush = false;
+
+            int head = 0;
+            while (head < queue.Count)
+            {
+                int index = queue[head++];
+                size++;
+
+                if (_bushIndexAt[index] != -1)
+                {
+                    hasBush = true;
+                }
+
+                int x = index % Size;
+                int y = index / Size;
+                TryEnqueueGrass(x - 1, y, visited, queue);
+                TryEnqueueGrass(x + 1, y, visited, queue);
+                TryEnqueueGrass(x, y - 1, visited, queue);
+                TryEnqueueGrass(x, y + 1, visited, queue);
+            }
+
+            sizes.Add(size);
+            patchCountByQuadrant[quadrant]++;
+            if (!hasBush)
+            {
+                patchesWithNoBush++;
+                noBushByQuadrant[quadrant]++;
+            }
+        }
+
+        sizes.Sort();
+        int count = sizes.Count;
+        int min = count > 0 ? sizes[0] : 0;
+        int max = count > 0 ? sizes[count - 1] : 0;
+        int median = count > 0 ? sizes[count / 2] : 0;
+
+        return new GrassConnectivityReport(count, min, median, max, patchesWithNoBush, patchCountByQuadrant, noBushByQuadrant);
+    }
+
+    private void TryEnqueueGrass(int x, int y, bool[] visited, List<int> queue)
+    {
+        if (x < 0 || x >= Size || y < 0 || y >= Size)
+        {
+            return;
+        }
+
+        int index = y * Size + x;
+        if (visited[index] || _terrain[index] != _grassId)
+        {
+            return;
+        }
+
+        visited[index] = true;
+        queue.Add(index);
+    }
+
     public void SetAgentHunger(int index, byte hunger) => _agents[index].Hunger = hunger;
 
     // Seams de test (session 14) : même statut que SetAgentHunger --
@@ -823,6 +938,17 @@ public sealed class World
         List<int> swap = _activeCurrent;
         _activeCurrent = _activeNext;
         _activeNext = swap;
+
+        // Un événement d'incendie se termine quand la liste active
+        // (après swap) redevient vide -- flush dans les accumulateurs
+        // avant de remettre le compteur à zéro pour le prochain feu.
+        if (_activeCurrent.Count == 0 && _currentFireEventTiles > 0)
+        {
+            _fireEventSizeSum += _currentFireEventTiles;
+            _fireEventCount++;
+            _fireEventMaxSize = Math.Max(_fireEventMaxSize, _currentFireEventTiles);
+            _currentFireEventTiles = 0;
+        }
     }
 
     private void TrySpreadTo(int x, int y)
@@ -832,9 +958,26 @@ public sealed class World
             return;
         }
 
+        int index = y * Size + x;
+        bool neighborFlammable = _catalog.Get(_terrain[index]).Flammable;
+
+        // Lecture pure (catalogue + terrain), aucune consommation de
+        // _rngFire : le tirage ci-dessous reste le seul et unique appel
+        // RNG de cette méthode, dans le même ordre qu'avant -- le
+        // comportement/déterminisme ne change pas, seule la
+        // classification diagnostique est nouvelle.
         if (_rngFire.NextDouble() >= _config.FireSpreadChance)
         {
+            if (neighborFlammable && !_burning[index])
+            {
+                _fireFizzledCount++;
+            }
             return;
+        }
+
+        if (!neighborFlammable)
+        {
+            _fireBlockedByTerrainCount++;
         }
 
         TryIgnite(x, y, _activeNext);
@@ -856,6 +999,7 @@ public sealed class World
 
         _burning[index] = true;
         active.Add(index);
+        _currentFireEventTiles++;
     }
 
     private void TickAgents(double delta)

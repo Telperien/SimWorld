@@ -1,14 +1,18 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/WorldRenderer.cs" id="1"]
 [ext_resource type="Script" path="res://scripts/CameraController.cs" id="2"]
 [ext_resource type="Script" path="res://scripts/AgentRenderer.cs" id="3"]
+[ext_resource type="Script" path="res://scripts/VegetationRenderer.cs" id="4"]
 
 [node name="Main" type="Node2D"]
 
 [node name="WorldSprite" type="Sprite2D" parent="."]
 centered = false
 script = ExtResource("1")
+
+[node name="VegetationMultiMesh" type="Node2D" parent="."]
+script = ExtResource("4")
 
 [node name="AgentsMultiMesh" type="MultiMeshInstance2D" parent="."]
 script = ExtResource("3")

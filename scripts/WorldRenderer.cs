@@ -69,6 +69,12 @@ public partial class WorldRenderer : Sprite2D
         }
     }
 
+    // La végétation (buisson/arbre) est rendue par VegetationRenderer
+    // (MultiMeshInstance2D GPU-instancié, session 17b) -- peindre un
+    // pixel par plante ici, à chaque tick, pour des dizaines de milliers
+    // d'entités serait un vrai risque de performance (SetPixel est lent,
+    // et un buisson/arbre fait maintenant 4x4 à 14x14, pas 1 pixel).
+    // Ce redraw ne peint plus que le TERRAIN.
     private void Redraw()
     {
         for (int y = 0; y < Size; y++)
@@ -80,18 +86,6 @@ public partial class WorldRenderer : Sprite2D
                     : ColorFromHex(_catalog.Get(World.GetTerrainId(x, y)).Color);
                 _image.SetPixel(x, y, color);
             }
-        }
-
-        for (int i = 0; i < World.VegetationCount; i++)
-        {
-            Vegetation vegetation = World.GetVegetation(i);
-            if (World.IsBurning(vegetation.X, vegetation.Y))
-            {
-                continue;
-            }
-
-            Color color = ColorFromHex(_vegetationCatalog.Get(vegetation.Type).Color);
-            _image.SetPixel(vegetation.X, vegetation.Y, color);
         }
 
         _texture.Update(_image);
