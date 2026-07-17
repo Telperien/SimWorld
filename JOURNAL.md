@@ -444,3 +444,53 @@
   place. Si des morts de faim résiduelles apparaissent à plus grande
   échelle (2000 agents visés), reconsidérer MaxFoodSearchRadius
   (non touché cette session, comme convenu).
+
+## Session 14 — Reproduction, boom-bust, gradient de nourriture terrain-aware
+- Fait : reproduction complète (species.json, âge/sexe/gestation sur
+  Agent, grille grossière d'agents réutilisée pour recherche de
+  partenaire + frein progressif par capacité de charge locale,
+  naissances avec repli tuile sûre/tableau plein). Diagnostic
+  boom-bust : le crash de population est une mortalité de faim
+  massive (pas un écho de cohorte, ageD<30/intervalle partout vs
+  faimD~3000 aux crashs) causée par une famine LOCALE — les
+  naissances s'agglutinent, rasent leur voisinage plus vite que le
+  délai de repousse, et créent des déserts hors de portée du BFS
+  (±16) alors que 66% de la carte reste couverte. Décidé : l'oscillation
+  boom-bust est le comportement voulu (Lotka-Volterra), pas un plateau
+  à chercher — seule la CÉCITÉ (mourir sans avoir perçu une ressource
+  abondante à 40 tuiles) est un bug. Fix : champ de gradient de
+  nourriture diffusé sur la grille grossière (même patron double-buffer
+  que le feu), suivi par un agent dont le BFS local échoue. Trouvaille
+  en cours de route : la première version diffusait uniformément à
+  travers tout terrain walkable, y compris le sable (jamais porteur de
+  buisson) — un agent pouvait être attiré à travers un désert létal
+  vers un amas lointain plutôt qu'une source proche (morts sur sable
+  18,7%→61%). Corrigé en pondérant la diffusion par la conductivité de
+  chaque cellule (fraction d'herbe, plancher 0,05) : le sable atténue
+  le signal au lieu de le laisser passer intact.
+  Résultat final (2M ticks) : morts de faim "vraiment aveugles" (aucun
+  signal BFS ni gradient au dernier cycle de décision) à 9,5% (seed 42)
+  et 6,1% (seed 7), contre 58%/54% avant le gradient. Oscillation
+  bornée confirmée sur 2M ticks complets (aucune naissance refusée sur
+  les deux seeds une fois AgentCapacityMultiplier relevé 15→40 — la
+  régulation par capacité de charge locale, pas un plafond de tableau,
+  gouverne bien la population).
+  Mesure demandée (question 2b, pas un fix) : corrélation
+  agents/végétation par quadrant mitigée selon le seed — nette
+  corrélation inverse sur seed 42 (BG : le plus d'agents, le moins de
+  végétation), mais sur seed 7 le quadrant HG a presque aucun agent
+  ET la plus faible végétation — le broutage n'explique pas tout,
+  un biais spatial pré-existant (s12/s13) semble aussi jouer.
+  `Vegetation_SpatialDistribution_IsBalanced` passe maintenant sur les
+  deux seeds sans y avoir touché (la dynamique a changé assez pour que
+  le test, inchangé, passe).
+- Cassé : rien de comportemental non voulu. 8 tests longs (2M ticks)
+  + suite complète verts, golden-hash recalculé et signalé à chaque
+  changement de comportement (reproduction, puis gradient, puis
+  conductivité terrain).
+- Prochaine fois : la corrélation agents/végétation mitigée sur seed 7
+  mérite un vrai suivi si la clusterisation redevient un sujet actif.
+  Foyers (prochaine session) vont délibérément agglutiner les agents —
+  toute calibration fine de l'équilibre nourriture/population faite
+  maintenant serait invalidée, donc pas touché (bushDensity,
+  MaxFoodSearchRadius, formule de reproduction).

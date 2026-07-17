@@ -128,6 +128,11 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   marche aléatoire pure : le déplacement d'une marche aléatoire croît
   en √N, donc elle ne peut pas échapper à une zone stérile plus large
   que quelques tuiles.
+- Un agent ne doit jamais mourir faute d'avoir PERÇU une ressource
+  abondante. La perception locale (BFS ±16) ne suffit pas dès que les
+  agents s'agglutinent : ils carvent des déserts plus larges que leur
+  perception. Toute pénurie locale doit être échappable par un
+  gradient, jamais par une marche aléatoire (déplacement en √N).
 
 ## Lisibilité
 - Toute valeur affichée = Breakdown(final, Modifier[]). Jamais un float nu.

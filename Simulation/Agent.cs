@@ -43,6 +43,30 @@ public struct Agent
     public byte WanderDirection;
     public byte WanderTicksRemaining;
 
+    // Âge et reproduction (session 14). Influencent le comportement
+    // futur -> inclus dans Hash().
+    public uint Age;
+
+    // Roulé UNE FOIS à la naissance (espérance ± variance de l'espèce),
+    // jamais retiré -- même patron que Vegetation.DeathTick.
+    public uint LifespanTicks;
+
+    // 0 = femelle, 1 = mâle.
+    public byte Sex;
+
+    // 0 = non gestante, sinon tick absolu de mise bas.
+    public uint PregnantUntil;
+
+    // Id stable du père, valide seulement pendant la gestation --
+    // influence le FatherId du futur nouveau-né.
+    public uint PendingFatherId;
+
+    // Cause de la mort ce tick (Faim ou Âge), lue par CleanupDeadAgents
+    // pour router vers le bon compteur. Ne persiste jamais au-delà du
+    // tick où elle est écrite (l'agent est compacté hors du tableau
+    // avant qu'un Hash() puisse la voir) -> exclue de Hash().
+    public byte CauseOfDeath;
+
     // --- Diagnostic (session 12) ---
     // Écrits uniquement, jamais lus par une décision : n'influencent
     // jamais le comportement, donc exclus de World.Hash().
@@ -52,4 +76,19 @@ public struct Agent
     public uint TicksSeeking;
     public uint TicksEating;
     public byte HungerAtLastMealStart;
+
+    // Issue du dernier cycle de décision de recherche de nourriture
+    // (session 14d) : 0 = jamais cherché, 1 = buisson trouvé par BFS
+    // direct, 2 = suit le gradient de nourriture, 3 = repli errance
+    // aveugle. Distingue "en route vers une source connue" (légitime)
+    // de "aucun signal, marche au hasard" (le vrai signe d'aveuglement).
+    public byte LastSeekOutcome;
+}
+
+public static class SeekOutcome
+{
+    public const byte NeverSearched = 0;
+    public const byte FoundBush = 1;
+    public const byte FollowingGradient = 2;
+    public const byte BlindWander = 3;
 }

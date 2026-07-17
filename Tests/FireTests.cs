@@ -16,6 +16,12 @@ public class FireTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SpeciesCatalog LoadSpeciesCatalog()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
+        return SpeciesCatalog.Load(File.ReadAllText(path));
+    }
+
     private static SimulationConfig LoadSimulationConfig()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
@@ -39,8 +45,9 @@ public class FireTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 7, size: 32, catalog, vegetation, config);
+        var world = new World(seed: 7, size: 32, catalog, vegetation, species, config);
         FillGrass(world, catalog, 10, 10, 20, 20);
         catalog.TryGetId("ash", out byte ash);
 
@@ -72,8 +79,9 @@ public class FireTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 7, size: 16, catalog, vegetation, config);
+        var world = new World(seed: 7, size: 16, catalog, vegetation, species, config);
         catalog.TryGetId("grass", out byte grass);
         catalog.TryGetId("water", out byte water);
 
@@ -95,8 +103,9 @@ public class FireTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 3, size: 16, catalog, vegetation, config);
+        var world = new World(seed: 3, size: 16, catalog, vegetation, species, config);
         catalog.TryGetId("grass", out byte grass);
         catalog.TryGetId("ash", out byte ash);
         world.SetTerrainId(5, 5, grass);
@@ -115,10 +124,11 @@ public class FireTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
 
-        var a = new World(seed: 11, size: 32, catalog, vegetation, config);
-        var b = new World(seed: 11, size: 32, catalog, vegetation, config);
+        var a = new World(seed: 11, size: 32, catalog, vegetation, species, config);
+        var b = new World(seed: 11, size: 32, catalog, vegetation, species, config);
         FillGrass(a, catalog, 5, 5, 25, 25);
         FillGrass(b, catalog, 5, 5, 25, 25);
 
@@ -139,8 +149,9 @@ public class FireTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 13, size: 16, catalog, vegetation, config);
+        var world = new World(seed: 13, size: 16, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("tree", out byte treeType);

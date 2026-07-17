@@ -21,5 +21,11 @@
   "vegetationSpreadChance": 0.02,
   "vegetationSpontaneousChance": 0.003,
   "wanderPersistenceTicks": 6,
-  "wanderTurnChance": 0.15
+  "wanderTurnChance": 0.15,
+  "mateSearchRadius": 8,
+  "agentCapacityMultiplier": 40,
+  "baseConceptionChance": 0.02,
+  "targetFoodPerCapita": 5.0,
+  "foodGradientDiffusionRate": 0.2,
+  "foodGradientDiffusionIterations": 12
 }

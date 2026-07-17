@@ -16,6 +16,12 @@ public class VegetationTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SpeciesCatalog LoadSpeciesCatalog()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
+        return SpeciesCatalog.Load(File.ReadAllText(path));
+    }
+
     private static SimulationConfig LoadSimulationConfig()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
@@ -27,8 +33,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 2, size: 32, catalog, vegetation, config);
+        var world = new World(seed: 2, size: 32, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("bush", out byte bushType);
@@ -51,8 +58,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 15, size: 64, catalog, vegetation, config);
+        var world = new World(seed: 15, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         for (int y = 0; y < world.Size; y++)
@@ -80,8 +88,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 50, size: 64, catalog, vegetation, config);
+        var world = new World(seed: 50, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("bush", out byte bushType);
@@ -108,6 +117,7 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         // Capacité large + taux de diffusion haut : test déterministe qui
         // ne dépend pas du tuning réel du jeu (VegetationSpreadChance en
         // conditions normales est bien plus bas).
@@ -118,7 +128,7 @@ public class VegetationTests
             VegetationSpreadChance = 0.9,
         };
 
-        var world = new World(seed: 40, size: 16, catalog, vegetation, config);
+        var world = new World(seed: 40, size: 16, catalog, vegetation, species, config);
         catalog.TryGetId("grass", out byte grass);
         for (int y = 0; y < world.Size; y++)
         {
@@ -157,8 +167,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig() with { VegetationSpreadChance = 0.8, VegetationSpontaneousChance = 0.0 };
-        var world = new World(seed: 71, size: 64, catalog, vegetation, config);
+        var world = new World(seed: 71, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         for (int y = 0; y < world.Size; y++)
@@ -226,8 +237,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig() with { VegetationSpontaneousChance = 0.05 };
-        var world = new World(seed: 72, size: 32, catalog, vegetation, config);
+        var world = new World(seed: 72, size: 32, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         for (int y = 0; y < world.Size; y++)
@@ -258,8 +270,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed, size: 512, catalog, vegetation, config);
+        var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         for (int i = 0; i < 2_000_000; i++)
         {
@@ -316,8 +329,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig() with { AshToGrassChance = 0.9 };
-        var world = new World(seed: 80, size: 16, catalog, vegetation, config);
+        var world = new World(seed: 80, size: 16, catalog, vegetation, species, config);
 
         catalog.TryGetId("ash", out byte ash);
         catalog.TryGetId("grass", out byte grass);
@@ -357,8 +371,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed: 55, size: 16, catalog, vegetation, config);
+        var world = new World(seed: 55, size: 16, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
         vegetation.TryGetId("tree", out byte treeType);
@@ -381,8 +396,9 @@ public class VegetationTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
-        var world = new World(seed, size: 512, catalog, vegetation, config);
+        var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         vegetation.TryGetId("tree", out byte treeType);
 

@@ -16,6 +16,12 @@ public class WorldTests
         return VegetationCatalog.Load(File.ReadAllText(path));
     }
 
+    private static SpeciesCatalog LoadSpeciesCatalog()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
+        return SpeciesCatalog.Load(File.ReadAllText(path));
+    }
+
     private static SimulationConfig LoadSimulationConfig()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
@@ -27,10 +33,11 @@ public class WorldTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
 
-        var a = new World(seed: 42, size: 64, catalog, vegetation, config);
-        var b = new World(seed: 42, size: 64, catalog, vegetation, config);
+        var a = new World(seed: 42, size: 64, catalog, vegetation, species, config);
+        var b = new World(seed: 42, size: 64, catalog, vegetation, species, config);
 
         Assert.Equal(a.Hash(), b.Hash());
     }
@@ -40,10 +47,11 @@ public class WorldTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
 
-        var a = new World(seed: 1, size: 64, catalog, vegetation, config);
-        var b = new World(seed: 2, size: 64, catalog, vegetation, config);
+        var a = new World(seed: 1, size: 64, catalog, vegetation, species, config);
+        var b = new World(seed: 2, size: 64, catalog, vegetation, species, config);
 
         Assert.NotEqual(a.Hash(), b.Hash());
     }
@@ -53,9 +61,10 @@ public class WorldTests
     {
         var catalog = LoadCatalog();
         var vegetation = LoadVegetationCatalog();
+        var species = LoadSpeciesCatalog();
         var config = LoadSimulationConfig();
 
-        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation, config));
+        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation, species, config));
     }
 
     [Fact]

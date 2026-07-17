@@ -12,6 +12,7 @@ public partial class WorldRenderer : Sprite2D
 
     private TerrainCatalog _catalog = null!;
     private VegetationCatalog _vegetationCatalog = null!;
+    private SpeciesCatalog _speciesCatalog = null!;
     private Image _image = null!;
     private ImageTexture _texture = null!;
     private double _accumulator;
@@ -24,10 +25,13 @@ public partial class WorldRenderer : Sprite2D
         string vegetationJson = FileAccess.GetFileAsString("res://data/vegetation.json");
         _vegetationCatalog = VegetationCatalog.Load(vegetationJson);
 
+        string speciesJson = FileAccess.GetFileAsString("res://data/species.json");
+        _speciesCatalog = SpeciesCatalog.Load(speciesJson);
+
         string simulationJson = FileAccess.GetFileAsString("res://data/simulation.json");
         var config = SimulationConfig.Load(simulationJson);
 
-        World = new World(Seed, Size, _catalog, _vegetationCatalog, config);
+        World = new World(Seed, Size, _catalog, _vegetationCatalog, _speciesCatalog, config);
 
         _image = Image.CreateEmpty(Size, Size, false, Image.Format.Rgb8);
         _texture = ImageTexture.CreateFromImage(_image);

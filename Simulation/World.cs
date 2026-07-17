@@ -3,6 +3,7 @@ namespace Simulation;
 public enum DeathCause : byte
 {
     Hunger = 0,
+    Age = 1,
 }
 
 public sealed class World
@@ -43,6 +44,7 @@ public sealed class World
     private readonly int[] _vegetationClearedTick;
     private readonly TerrainCatalog _catalog;
     private readonly VegetationCatalog _vegetationCatalog;
+    private readonly SpeciesCatalog _speciesCatalog;
     private readonly Rng _rngWorldGen;
     private readonly Rng _rngFire;
     private readonly Rng _rngAgents;
@@ -55,9 +57,67 @@ public sealed class World
     private readonly int _boxSide;
     private readonly int[] _searchGeneration;
     private readonly int[] _searchCameFrom;
-    private readonly int[] _deathsByCause = new int[1];
+    private readonly int[] _deathsByCause = new int[2];
     private int _tickCounter;
     private uint _nextAgentId;
+
+    // Grille grossière d'agents (session 14) : aucune structure spatiale
+    // n'existait pour les agents avant cette session (contrairement à la
+    // végétation, indexée par tuile). Reconstruite à chaque tick réel,
+    // scratch pur -- exclue de Hash() (même raisonnement que
+    // _searchQueue). Sert à la recherche de partenaire (portée
+    // MateSearchRadius) ET à la densité locale d'agents pour le frein
+    // progressif (item 4).
+    //
+    // Comptage par bucket sur tableaux plats préalloués (pas de
+    // List<int>.Add : la taille d'un bucket varie tick à tick avec les
+    // déplacements des agents, un List grossirait et réallouerait --
+    // interdit dans le tick). _agentGridCellStart est un prefix-sum de
+    // taille cellCount+1 ; _agentGridEntries contient les index d'agent
+    // groupés par cellule, [_agentGridCellStart[c], _agentGridCellStart[c+1]).
+    private readonly int _agentGridCellSize;
+    private readonly int _agentGridWidth;
+    private readonly int _agentGridHeight;
+    private readonly int[] _agentGridCellCounts;
+    private readonly int[] _agentGridCellStart;
+    private readonly int[] _agentGridEntries;
+
+    // Densité de nourriture par cellule (même grille), reconstruite une
+    // fois par tick végétation seulement (coût déjà budgété, cf.
+    // TickVegetationGrowth/Aging qui itèrent déjà tout _bushes chaque
+    // tick végétation) -- jamais dans le chemin chaud à 30 Hz.
+    private readonly int[] _foodPerCell;
+
+    // Champ de gradient de nourriture (session 14c) : diffusion de
+    // _foodPerCell sur la même grille, même principe que TickFire
+    // (lire _current, écrire _next, swap) mais dense au lieu de
+    // sparse. Un agent affamé dont le BFS local (±MaxFoodSearchRadius)
+    // échoue lit sa cellule et ses voisines au lieu de marcher au
+    // hasard -- corrige la cécité au-delà de la portée de perception
+    // sans BFS élargi. Recalculé au tick végétation seulement, comme
+    // _foodPerCell.
+    private readonly double[] _foodGradientA;
+    private readonly double[] _foodGradientB;
+    private double[] _foodGradient;
+
+    // Conductivité par cellule (session 14d) : fraction de tuiles
+    // HERBE dans la cellule, plancher 0.05 (jamais nulle -- un signal
+    // résiduel doit pouvoir traverser un désert total, même piège
+    // symétrique que la repousse de végétation). Le sable/pierre/
+    // cendre/eau ne portent jamais de buisson (cf. TrySpreadBushTo,
+    // grass uniquement) : sans pondération, la diffusion les traverse
+    // comme de l'herbe et peut attirer un agent à travers un désert
+    // létal vers un amas lointain plutôt qu'une source proche.
+    // Recalculée au tick végétation (même cadence que _foodPerCell).
+    private readonly double[] _cellConductivity;
+    private readonly int[] _cellGrassCountScratch;
+    private readonly int[] _cellTotalCountScratch;
+
+    // Diagnostic (comme MealsEaten) : exclus de Hash().
+    private int _birthsTotal;
+    private int _birthsRefusedArrayFull;
+    private int _birthsLostToUnsafeTile;
+    private int _minAliveCountEverObserved = int.MaxValue;
 
     // --- Diagnostic de mort (session 12) : compteurs cumulés, jamais
     // lus par une décision, exclus de Hash() comme MealsEaten/DeathCause. ---
@@ -67,6 +127,7 @@ public sealed class World
     private static readonly double[] DeathDistanceBucketBounds = { 5, 10, 15, 20, 25, 33, 50, 100, 200 };
     private readonly int[] _deathDistanceHistogram = new int[DeathDistanceBucketBounds.Length + 1];
     private readonly int[] _deathTerrainHistogram = new int[256];
+    private readonly int[] _deathSeekOutcomeHistogram = new int[4];
     private long _deathFailureStreakSum;
     private long _deathTicksIdleSum;
     private long _deathTicksMovingSum;
@@ -114,11 +175,24 @@ public sealed class World
 
     public int VegetationLostToFire { get; private set; }
 
+    public int BirthsTotal => _birthsTotal;
+
+    public int BirthsRefusedArrayFull => _birthsRefusedArrayFull;
+
+    public int BirthsLostToUnsafeTile => _birthsLostToUnsafeTile;
+
+    // Répond au piège de méthode signalé : échantillonner tous les
+    // 100k ticks peut rater un creux court. Suivi à CHAQUE tick réel,
+    // pas seulement aux points d'échantillonnage.
+    public int MinAliveCountEverObserved => _minAliveCountEverObserved;
+
     public static IReadOnlyList<double> DeathDistanceBucketUpperBounds => DeathDistanceBucketBounds;
 
     public int[] GetDeathDistanceHistogram() => (int[])_deathDistanceHistogram.Clone();
 
     public int[] GetDeathTerrainHistogram() => (int[])_deathTerrainHistogram.Clone();
+
+    public int[] GetDeathSeekOutcomeHistogram() => (int[])_deathSeekOutcomeHistogram.Clone();
 
     public double AverageDeathFailureStreak => AverageOverDeaths(_deathFailureStreakSum);
 
@@ -138,7 +212,7 @@ public sealed class World
         return deaths > 0 ? sum / (double)deaths : 0.0;
     }
 
-    public World(int seed, int size, TerrainCatalog catalog, VegetationCatalog vegetationCatalog, SimulationConfig config)
+    public World(int seed, int size, TerrainCatalog catalog, VegetationCatalog vegetationCatalog, SpeciesCatalog speciesCatalog, SimulationConfig config)
     {
         if (size <= 0 || (size & (size - 1)) != 0)
         {
@@ -148,6 +222,7 @@ public sealed class World
         Size = size;
         _catalog = catalog;
         _vegetationCatalog = vegetationCatalog;
+        _speciesCatalog = speciesCatalog;
         _config = config;
         _terrain = new byte[size * size];
         _burning = new bool[size * size];
@@ -188,14 +263,31 @@ public sealed class World
             }
         }
 
-        _agents = new Agent[(int)(config.AgentDensity * size * size)];
+        int initialPopulation = (int)(config.AgentDensity * size * size);
+        int agentCapacity = initialPopulation * config.AgentCapacityMultiplier;
+        _agents = new Agent[agentCapacity];
         _agentPaths = new List<int>[_agents.Length];
         for (int i = 0; i < _agentPaths.Length; i++)
         {
             _agentPaths[i] = new List<int>();
         }
 
-        SpawnAgents();
+        _agentGridCellSize = Math.Max(1, config.MateSearchRadius);
+        _agentGridWidth = (size + _agentGridCellSize - 1) / _agentGridCellSize;
+        _agentGridHeight = _agentGridWidth;
+        int cellCount = _agentGridWidth * _agentGridHeight;
+        _agentGridCellCounts = new int[cellCount];
+        _agentGridCellStart = new int[cellCount + 1];
+        _agentGridEntries = new int[agentCapacity];
+        _foodPerCell = new int[cellCount];
+        _foodGradientA = new double[cellCount];
+        _foodGradientB = new double[cellCount];
+        _foodGradient = _foodGradientA;
+        _cellConductivity = new double[cellCount];
+        _cellGrassCountScratch = new int[cellCount];
+        _cellTotalCountScratch = new int[cellCount];
+
+        SpawnAgents(initialPopulation);
 
         _bushes = new Vegetation[(int)(config.BushDensity * size * size)];
         _bushIndexAt = new int[size * size];
@@ -386,7 +478,45 @@ public sealed class World
         return best;
     }
 
+    // Diagnostic (session 14b) : écart-type du nombre d'agents par
+    // cellule de la grille grossière déjà reconstruite chaque tick
+    // (cf. RebuildAgentGrid) -- mesure la clusterisation des AGENTS,
+    // distincte de celle des buissons (déjà mesurée par SimReport en
+    // s13). Lecture pure, exclue de Hash() (comme DistanceToNearestMatureBush).
+    public double AgentDensityStdDev()
+    {
+        int cellCount = _agentGridWidth * _agentGridHeight;
+        if (cellCount == 0)
+        {
+            return 0.0;
+        }
+
+        double mean = (double)AliveCount / cellCount;
+        double sumSquaredDiff = 0.0;
+        for (int c = 0; c < cellCount; c++)
+        {
+            double diff = AgentCountInCell(c) - mean;
+            sumSquaredDiff += diff * diff;
+        }
+        return Math.Sqrt(sumSquaredDiff / cellCount);
+    }
+
     public void SetAgentHunger(int index, byte hunger) => _agents[index].Hunger = hunger;
+
+    // Seams de test (session 14) : même statut que SetAgentHunger --
+    // permettent de forcer un scénario déterministe sans dépendre du
+    // hasard du spawn.
+    public void SetAgentAge(int index, uint age) => _agents[index].Age = age;
+
+    public void SetAgentLifespan(int index, uint lifespan) => _agents[index].LifespanTicks = lifespan;
+
+    public void SetAgentSex(int index, byte sex) => _agents[index].Sex = sex;
+
+    public void SetAgentPosition(int index, float x, float y)
+    {
+        _agents[index].X = x;
+        _agents[index].Y = y;
+    }
 
     public void Execute(ICommand command) => command.Execute(this);
 
@@ -426,6 +556,14 @@ public sealed class World
             TickVegetationAging();
             TickVegetationSpread();
             TickAshRecovery();
+            RebuildFoodDensityGrid();
+            RebuildCellConductivity();
+            RebuildFoodGradient();
+        }
+
+        if (AliveCount < _minAliveCountEverObserved)
+        {
+            _minAliveCountEverObserved = AliveCount;
         }
 
         _tickCounter++;
@@ -483,6 +621,11 @@ public sealed class World
             Mix(ref hash, agent.SeekCooldown);
             Mix(ref hash, agent.WanderDirection);
             Mix(ref hash, agent.WanderTicksRemaining);
+            Mix(ref hash, agent.Age);
+            Mix(ref hash, agent.LifespanTicks);
+            Mix(ref hash, agent.Sex);
+            Mix(ref hash, agent.PregnantUntil);
+            Mix(ref hash, agent.PendingFatherId);
 
             List<int> path = _agentPaths[i];
             Mix(ref hash, (ulong)path.Count);
@@ -514,6 +657,23 @@ public sealed class World
             Mix(ref hash, veg.Stage);
             Mix(ref hash, (uint)veg.FoodRemaining);
             Mix(ref hash, unchecked((uint)veg.DeathTick));
+        }
+
+        // Champ de gradient de nourriture (session 14c) : dérivé
+        // déterministe de _foodPerCell (déjà couvert via _bushes
+        // ci-dessus), donc redondant en théorie -- inclus quand même
+        // par prudence, cf. plan.
+        foreach (double value in _foodGradient)
+        {
+            Mix(ref hash, BitConverter.DoubleToUInt64Bits(value));
+        }
+
+        // Conductivité (session 14d) : même raisonnement de prudence
+        // que _foodGradient -- dérivée déterministe de _terrain (déjà
+        // hashé), incluse quand même.
+        foreach (double value in _cellConductivity)
+        {
+            Mix(ref hash, BitConverter.DoubleToUInt64Bits(value));
         }
 
         return hash;
@@ -612,6 +772,8 @@ public sealed class World
 
     private void TickAgents(double delta)
     {
+        RebuildAgentGrid();
+
         int group = _tickCounter & 3;
         float step = (float)(_config.AgentMoveSpeed * delta);
 
@@ -645,6 +807,149 @@ public sealed class World
         }
     }
 
+    // Grille grossière d'agents (session 14) : reconstruite en un seul
+    // passage O(AliveCount) au début de chaque tick réel, avant que les
+    // agents ne pensent -- ils la consultent (recherche de partenaire,
+    // densité locale) mais ne la modifient jamais pendant leur propre
+    // tick de pensée (staleness d'un tick, acceptable, même esprit que
+    // le snapshot de végétation pour la diffusion).
+    private void RebuildAgentGrid()
+    {
+        Array.Clear(_agentGridCellCounts);
+
+        for (int i = 0; i < AliveCount; i++)
+        {
+            ref Agent agent = ref _agents[i];
+            _agentGridCellCounts[AgentCellIndex(agent.X, agent.Y)]++;
+        }
+
+        _agentGridCellStart[0] = 0;
+        for (int c = 0; c < _agentGridCellCounts.Length; c++)
+        {
+            _agentGridCellStart[c + 1] = _agentGridCellStart[c] + _agentGridCellCounts[c];
+        }
+
+        // Réutilisé comme curseur d'écriture par cellule (repart de 0).
+        Array.Clear(_agentGridCellCounts);
+        for (int i = 0; i < AliveCount; i++)
+        {
+            ref Agent agent = ref _agents[i];
+            int cell = AgentCellIndex(agent.X, agent.Y);
+            int slot = _agentGridCellStart[cell] + _agentGridCellCounts[cell];
+            _agentGridEntries[slot] = i;
+            _agentGridCellCounts[cell]++;
+        }
+    }
+
+    private int AgentCountInCell(int cell) => _agentGridCellStart[cell + 1] - _agentGridCellStart[cell];
+
+    private int AgentCellIndex(float x, float y)
+    {
+        int cellX = Math.Clamp((int)(x / _agentGridCellSize), 0, _agentGridWidth - 1);
+        int cellY = Math.Clamp((int)(y / _agentGridCellSize), 0, _agentGridHeight - 1);
+        return cellY * _agentGridWidth + cellX;
+    }
+
+    // Densité de nourriture locale (session 14), même grille que les
+    // agents -- reconstruite une fois par tick végétation en scannant
+    // _bushes[0..BushCount) une fois (coût déjà budgété : du même ordre
+    // que TickVegetationGrowth/Aging qui itèrent déjà tout le tableau
+    // chaque tick végétation). Seuls les buissons MÛRS comptent comme
+    // nourriture disponible, même critère que CountMatureVegetationOfType.
+    private void RebuildFoodDensityGrid()
+    {
+        Array.Clear(_foodPerCell);
+
+        int matureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
+        for (int i = 0; i < BushCount; i++)
+        {
+            ref Vegetation bush = ref _bushes[i];
+            if (bush.Stage < matureStage)
+            {
+                continue;
+            }
+
+            int cell = AgentCellIndex(bush.X, bush.Y);
+            _foodPerCell[cell]++;
+        }
+    }
+
+    // Conductivité par cellule (session 14d) : fraction de tuiles HERBE
+    // parmi toutes les tuiles de la cellule, plancher 0.05. Balaie tout
+    // _terrain une fois (coût du même ordre que TickAshRecovery, déjà
+    // un scan complet à cette cadence).
+    private void RebuildCellConductivity()
+    {
+        Array.Clear(_cellGrassCountScratch);
+        Array.Clear(_cellTotalCountScratch);
+
+        for (int y = 0; y < Size; y++)
+        {
+            for (int x = 0; x < Size; x++)
+            {
+                int cell = AgentCellIndex(x, y);
+                _cellTotalCountScratch[cell]++;
+                if (_terrain[y * Size + x] == _grassId)
+                {
+                    _cellGrassCountScratch[cell]++;
+                }
+            }
+        }
+
+        for (int c = 0; c < _cellConductivity.Length; c++)
+        {
+            double fraction = _cellTotalCountScratch[c] > 0 ? (double)_cellGrassCountScratch[c] / _cellTotalCountScratch[c] : 0.0;
+            _cellConductivity[c] = Math.Max(0.05, fraction);
+        }
+    }
+
+    // Diffusion du champ de nourriture (session 14c, terrain-aware
+    // depuis s14d) : même principe que TickFire (lire _current, écrire
+    // _next, swap), mais dense -- chaque cellule diffuse vers ses 4
+    // voisines à chaque passe, sur FoodGradientDiffusionIterations
+    // passes. Pondérée par _cellConductivity : le sable/pierre/cendre/
+    // eau ne portent jamais de buisson (cf. TrySpreadBushTo, grass
+    // uniquement) et conduisent donc mal le signal -- sans ça, le
+    // gradient d'un gros amas lointain traverserait un désert intact et
+    // attirerait un agent à travers une zone stérile plutôt que vers
+    // une source proche (diagnostic s14c/s14d : morts sur sable 18,7%→61%).
+    private void RebuildFoodGradient()
+    {
+        int cellCount = _agentGridWidth * _agentGridHeight;
+        for (int c = 0; c < cellCount; c++)
+        {
+            _foodGradientA[c] = _foodPerCell[c];
+        }
+
+        double[] current = _foodGradientA;
+        double[] next = _foodGradientB;
+
+        for (int iter = 0; iter < _config.FoodGradientDiffusionIterations; iter++)
+        {
+            for (int cy = 0; cy < _agentGridHeight; cy++)
+            {
+                for (int cx = 0; cx < _agentGridWidth; cx++)
+                {
+                    int c = cy * _agentGridWidth + cx;
+                    double weightedSum = 0.0;
+                    double weightSum = 0.0;
+
+                    if (cx > 0) { int n = c - 1; weightedSum += current[n] * _cellConductivity[n]; weightSum += _cellConductivity[n]; }
+                    if (cx < _agentGridWidth - 1) { int n = c + 1; weightedSum += current[n] * _cellConductivity[n]; weightSum += _cellConductivity[n]; }
+                    if (cy > 0) { int n = c - _agentGridWidth; weightedSum += current[n] * _cellConductivity[n]; weightSum += _cellConductivity[n]; }
+                    if (cy < _agentGridHeight - 1) { int n = c + _agentGridWidth; weightedSum += current[n] * _cellConductivity[n]; weightSum += _cellConductivity[n]; }
+
+                    double avgNeighbors = weightSum > 0 ? weightedSum / weightSum : current[c];
+                    next[c] = current[c] + _config.FoodGradientDiffusionRate * _cellConductivity[c] * (avgNeighbors - current[c]);
+                }
+            }
+
+            (current, next) = (next, current);
+        }
+
+        _foodGradient = current;
+    }
+
     private void ThinkAgent(ref Agent agent, int index)
     {
         agent.Hunger = (byte)Math.Min(255, agent.Hunger + _config.HungerIncreasePerThink);
@@ -652,7 +957,28 @@ public sealed class World
         if (agent.Hunger >= 255)
         {
             agent.State = AgentState.Dead;
+            agent.CauseOfDeath = (byte)DeathCause.Hunger;
             return;
+        }
+
+        // Vérifiée après la faim (ordre existant inchangé) : si les deux
+        // seuils sont franchis le même tick, la cause enregistrée est la
+        // Faim -- tranchage arbitraire mais déterministe (cf. plan,
+        // matrice d'interaction).
+        agent.Age++;
+        if (agent.Age >= agent.LifespanTicks)
+        {
+            agent.State = AgentState.Dead;
+            agent.CauseOfDeath = (byte)DeathCause.Age;
+            return;
+        }
+
+        // Gestation NE bloque PAS la recherche de nourriture (cf. plan,
+        // matrice d'interaction) : vérifiée ici, inconditionnellement,
+        // avant le retour anticipé Seeking/Eating ci-dessous.
+        if (agent.PregnantUntil != 0 && (uint)_tickCounter >= agent.PregnantUntil)
+        {
+            TryGiveBirth(ref agent);
         }
 
         if (agent.State == AgentState.Seeking || agent.State == AgentState.Eating)
@@ -680,6 +1006,7 @@ public sealed class World
                         agent.SeekCooldown = 0;
                         agent.SearchFailureStreak = 0;
                         agent.HungerAtLastMealStart = agent.Hunger;
+                        agent.LastSeekOutcome = SeekOutcome.FoundBush;
                     }
                     else
                     {
@@ -687,13 +1014,36 @@ public sealed class World
                         path.RemoveAt(path.Count - 1);
                         agent.State = AgentState.Seeking;
                         agent.SearchFailureStreak = 0;
+                        agent.LastSeekOutcome = SeekOutcome.FoundBush;
                     }
                     return;
                 }
 
                 agent.SeekCooldown = _config.SeekFailureCooldownThinkTicks;
                 agent.SearchFailureStreak++;
+
+                // Le BFS local a échoué : au lieu d'une errance
+                // aléatoire, l'agent lit le champ de nourriture diffusé
+                // et avance vers la cellule voisine la plus riche
+                // (session 14c, corrige la cécité au-delà du BFS).
+                // Repli sur l'errance dirigée existante si le gradient
+                // est plat localement (région jamais atteinte par la
+                // diffusion -- carte totalement vide).
+                if (TryFollowFoodGradient(ref agent))
+                {
+                    agent.LastSeekOutcome = SeekOutcome.FollowingGradient;
+                }
+                else
+                {
+                    TryStartMoving(ref agent);
+                    agent.LastSeekOutcome = SeekOutcome.BlindWander;
+                }
             }
+        }
+
+        if (agent.State == AgentState.Idle)
+        {
+            TryReproduce(ref agent, index);
         }
 
         // Errance : atteinte quand l'agent n'est pas affamé, ou qu'il
@@ -703,6 +1053,222 @@ public sealed class World
         {
             TryStartMoving(ref agent);
         }
+    }
+
+    // Reproduction (session 14) : rencontre par RAYON, pas par adjacence
+    // -- aucun déplacement, aucun nouvel état FSM, aucune réservation de
+    // partenaire. Le frein est PROGRESSIF (jamais un seuil dur) pour
+    // éviter les dents de scie boom/famine/effondrement : la chance de
+    // conception décroît linéairement avec la nourriture locale
+    // rapportée à la population locale.
+    private void TryReproduce(ref Agent agent, int index)
+    {
+        if (agent.Sex != 0 || agent.PregnantUntil != 0)
+        {
+            return;
+        }
+
+        SpeciesType species = _speciesCatalog.Get(agent.Species);
+        if (agent.Age < species.MaturityAge || agent.Hunger >= _config.HungerSeekThreshold)
+        {
+            return;
+        }
+
+        if (!TryFindMate(index, out int maleIndex))
+        {
+            return;
+        }
+
+        int cell = AgentCellIndex(agent.X, agent.Y);
+        int agentsInCell = AgentCountInCell(cell);
+        int foodInCell = _foodPerCell[cell];
+        double localFoodPerCapita = foodInCell / (double)(agentsInCell + 1);
+        double ratio = Math.Clamp(localFoodPerCapita / _config.TargetFoodPerCapita, 0.0, 1.0);
+        double conceptionChance = _config.BaseConceptionChance * ratio;
+
+        if (_rngAgents.NextDouble() >= conceptionChance)
+        {
+            return;
+        }
+
+        agent.PregnantUntil = (uint)_tickCounter + species.GestationTicks;
+        agent.PendingFatherId = _agents[maleIndex].Id;
+    }
+
+    // Scanne les cellules de la grille recouvrant MateSearchRadius autour
+    // de la femelle, dans un ordre géométrique fixe (lignes puis
+    // colonnes) et, à l'intérieur de chaque case, dans l'ordre
+    // d'insertion (= index croissant, cf. RebuildAgentGrid) -- pleinement
+    // déterministe. Ne garantit PAS le plus petit index global (un mâle
+    // valide dans une case scannée plus tard pourrait avoir un index
+    // plus petit qu'un candidat déjà retenu), mais c'est reproductible
+    // pour un même état, ce qu'exige réellement CLAUDE.md.
+    private bool TryFindMate(int femaleIndex, out int maleIndex)
+    {
+        ref Agent female = ref _agents[femaleIndex];
+        int radius = _config.MateSearchRadius;
+        double radiusSquared = (double)radius * radius;
+
+        int centerCellX = Math.Clamp((int)(female.X / _agentGridCellSize), 0, _agentGridWidth - 1);
+        int centerCellY = Math.Clamp((int)(female.Y / _agentGridCellSize), 0, _agentGridHeight - 1);
+        int cellReach = (radius + _agentGridCellSize - 1) / _agentGridCellSize;
+
+        int minCellY = Math.Max(0, centerCellY - cellReach);
+        int maxCellY = Math.Min(_agentGridHeight - 1, centerCellY + cellReach);
+        int minCellX = Math.Max(0, centerCellX - cellReach);
+        int maxCellX = Math.Min(_agentGridWidth - 1, centerCellX + cellReach);
+
+        for (int cy = minCellY; cy <= maxCellY; cy++)
+        {
+            for (int cx = minCellX; cx <= maxCellX; cx++)
+            {
+                int cell = cy * _agentGridWidth + cx;
+                int start = _agentGridCellStart[cell];
+                int end = _agentGridCellStart[cell + 1];
+                for (int b = start; b < end; b++)
+                {
+                    int candidateIndex = _agentGridEntries[b];
+                    if (candidateIndex == femaleIndex)
+                    {
+                        continue;
+                    }
+
+                    ref Agent candidate = ref _agents[candidateIndex];
+                    if (candidate.Sex != 1 || candidate.State != AgentState.Idle)
+                    {
+                        continue;
+                    }
+
+                    SpeciesType candidateSpecies = _speciesCatalog.Get(candidate.Species);
+                    if (candidate.Age < candidateSpecies.MaturityAge || candidate.Hunger >= _config.HungerSeekThreshold)
+                    {
+                        continue;
+                    }
+
+                    double dx = candidate.X - female.X;
+                    double dy = candidate.Y - female.Y;
+                    if (dx * dx + dy * dy > radiusSquared)
+                    {
+                        continue;
+                    }
+
+                    maleIndex = candidateIndex;
+                    return true;
+                }
+            }
+        }
+
+        maleIndex = -1;
+        return false;
+    }
+
+    // Naissance (session 14). Deux échecs distincts, comptés
+    // séparément pour ne pas polluer le signal "tableau plein" :
+    // tuile non sûre (feu/non walkable) et capacité du tableau Agent[]
+    // atteinte. "REFUSER" = définitif, jamais une file d'attente --
+    // JAMAIS agrandir le tableau en cours de tick (allocation interdite).
+    private void TryGiveBirth(ref Agent mother)
+    {
+        int motherTileX = (int)MathF.Floor(mother.X);
+        int motherTileY = (int)MathF.Floor(mother.Y);
+
+        if (!TryFindBirthTile(motherTileX, motherTileY, out int birthX, out int birthY))
+        {
+            _birthsLostToUnsafeTile++;
+            mother.PregnantUntil = 0;
+            mother.PendingFatherId = Agent.UnknownParent;
+            return;
+        }
+
+        if (AliveCount >= _agents.Length)
+        {
+            _birthsRefusedArrayFull++;
+            mother.PregnantUntil = 0;
+            mother.PendingFatherId = Agent.UnknownParent;
+            return;
+        }
+
+        SpeciesType species = _speciesCatalog.Get(mother.Species);
+        uint lifespan = RollLifespan(species);
+        int newIndex = AliveCount;
+
+        _agentPaths[newIndex].Clear();
+        _agents[newIndex] = new Agent
+        {
+            Id = _nextAgentId++,
+            X = birthX + 0.5f,
+            Y = birthY + 0.5f,
+            TargetX = birthX,
+            TargetY = birthY,
+            MotherId = mother.Id,
+            FatherId = mother.PendingFatherId,
+            Tracked = false,
+            State = AgentState.Idle,
+            Species = mother.Species,
+            Hunger = 0,
+            Facing = 0,
+            SeekCooldown = 0,
+            WanderDirection = 0,
+            WanderTicksRemaining = 0,
+            // Pas besoin d'étaler l'âge des naissances : elles sont déjà
+            // étalées dans le temps par construction (contrairement au
+            // spawn initial, cf. SpawnAgents).
+            Age = 0,
+            LifespanTicks = lifespan,
+            Sex = (byte)(_rngAgents.NextDouble() < 0.5 ? 0 : 1),
+            PregnantUntil = 0,
+            PendingFatherId = Agent.UnknownParent,
+            CauseOfDeath = 0,
+            SearchFailureStreak = 0,
+            TicksIdle = 0,
+            TicksMoving = 0,
+            TicksSeeking = 0,
+            TicksEating = 0,
+            HungerAtLastMealStart = 0,
+            LastSeekOutcome = SeekOutcome.NeverSearched,
+        };
+        AliveCount++;
+        _birthsTotal++;
+
+        mother.PregnantUntil = 0;
+        mother.PendingFatherId = Agent.UnknownParent;
+    }
+
+    private bool TryFindBirthTile(int motherX, int motherY, out int birthX, out int birthY)
+    {
+        if (IsSafeForBirth(motherX, motherY))
+        {
+            birthX = motherX;
+            birthY = motherY;
+            return true;
+        }
+
+        if (TryBirthOffset(motherX - 1, motherY, out birthX, out birthY)) return true;
+        if (TryBirthOffset(motherX + 1, motherY, out birthX, out birthY)) return true;
+        if (TryBirthOffset(motherX, motherY - 1, out birthX, out birthY)) return true;
+        if (TryBirthOffset(motherX, motherY + 1, out birthX, out birthY)) return true;
+
+        birthX = 0;
+        birthY = 0;
+        return false;
+    }
+
+    private bool TryBirthOffset(int x, int y, out int birthX, out int birthY)
+    {
+        if (x >= 0 && x < Size && y >= 0 && y < Size && IsSafeForBirth(x, y))
+        {
+            birthX = x;
+            birthY = y;
+            return true;
+        }
+        birthX = 0;
+        birthY = 0;
+        return false;
+    }
+
+    private bool IsSafeForBirth(int x, int y)
+    {
+        return _catalog.Get(_terrain[y * Size + x]).Walkable && !_burning[y * Size + x];
     }
 
     private void MoveAgent(ref Agent agent, int index, float step)
@@ -810,6 +1376,84 @@ public sealed class World
 
         agent.TargetX = targetX;
         agent.TargetY = targetY;
+    }
+
+    // Suit le champ de nourriture diffusé (session 14c) : lit la
+    // cellule courante et ses 4 voisines cardinales, avance d'une
+    // tuile vers celle dont la valeur est la plus haute. Coût O(1) --
+    // pas de BFS. Retourne false si aucune voisine ne dépasse la
+    // cellule courante (gradient plat, région jamais atteinte par la
+    // diffusion) ou si la tuile visée n'est pas franchissable :
+    // l'appelant retombe alors sur l'errance dirigée existante.
+    private bool TryFollowFoodGradient(ref Agent agent)
+    {
+        int currentX = (int)MathF.Floor(agent.X);
+        int currentY = (int)MathF.Floor(agent.Y);
+        int cell = AgentCellIndex(agent.X, agent.Y);
+        int cellX = cell % _agentGridWidth;
+        int cellY = cell / _agentGridWidth;
+
+        double bestValue = _foodGradient[cell];
+        int bestDx = 0;
+        int bestDy = 0;
+        bool found = false;
+
+        if (cellX > 0 && _foodGradient[cell - 1] > bestValue)
+        {
+            bestValue = _foodGradient[cell - 1];
+            bestDx = -1;
+            bestDy = 0;
+            found = true;
+        }
+        if (cellX < _agentGridWidth - 1 && _foodGradient[cell + 1] > bestValue)
+        {
+            bestValue = _foodGradient[cell + 1];
+            bestDx = 1;
+            bestDy = 0;
+            found = true;
+        }
+        if (cellY > 0 && _foodGradient[cell - _agentGridWidth] > bestValue)
+        {
+            bestValue = _foodGradient[cell - _agentGridWidth];
+            bestDx = 0;
+            bestDy = -1;
+            found = true;
+        }
+        if (cellY < _agentGridHeight - 1 && _foodGradient[cell + _agentGridWidth] > bestValue)
+        {
+            bestValue = _foodGradient[cell + _agentGridWidth];
+            bestDx = 0;
+            bestDy = 1;
+            found = true;
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        int targetX = currentX + bestDx;
+        int targetY = currentY + bestDy;
+
+        if (targetX < 0 || targetX >= Size || targetY < 0 || targetY >= Size ||
+            !_catalog.Get(_terrain[targetY * Size + targetX]).Walkable)
+        {
+            return false;
+        }
+
+        if (bestDx != 0)
+        {
+            agent.Facing = (byte)(bestDx < 0 ? 1 : 0);
+        }
+
+        agent.TargetX = targetX;
+        agent.TargetY = targetY;
+        agent.State = AgentState.Moving;
+
+        // Un retour ultérieur à l'errance pure repart d'un tirage
+        // frais, pas d'un vieux compteur de persistance directionnelle.
+        agent.WanderTicksRemaining = 0;
+        return true;
     }
 
     // Errance dirigée (session 13) : conserve une direction sur plusieurs
@@ -965,6 +1609,7 @@ public sealed class World
 
         byte terrainId = _terrain[tileY * Size + tileX];
         _deathTerrainHistogram[terrainId]++;
+        _deathSeekOutcomeHistogram[agent.LastSeekOutcome]++;
 
         _deathFailureStreakSum += agent.SearchFailureStreak;
         _deathTicksIdleSum += agent.TicksIdle;
@@ -994,8 +1639,11 @@ public sealed class World
         {
             if (_agents[i].State == AgentState.Dead)
             {
-                _deathsByCause[(byte)DeathCause.Hunger]++;
-                RecordDeathDiagnostics(ref _agents[i]);
+                _deathsByCause[_agents[i].CauseOfDeath]++;
+                if (_agents[i].CauseOfDeath == (byte)DeathCause.Hunger)
+                {
+                    RecordDeathDiagnostics(ref _agents[i]);
+                }
 
                 aliveCount--;
                 _agents[i] = _agents[aliveCount];
@@ -1013,13 +1661,13 @@ public sealed class World
         AliveCount = aliveCount;
     }
 
-    private void SpawnAgents()
+    private void SpawnAgents(int count)
     {
         int spawned = 0;
         int attempts = 0;
-        int maxAttempts = _agents.Length * MaxSpawnAttemptsPerAgent;
+        int maxAttempts = count * MaxSpawnAttemptsPerAgent;
 
-        while (spawned < _agents.Length && attempts < maxAttempts)
+        while (spawned < count && attempts < maxAttempts)
         {
             attempts++;
 
@@ -1030,6 +1678,9 @@ public sealed class World
             {
                 continue;
             }
+
+            SpeciesType species = _speciesCatalog.Get(0);
+            uint lifespan = RollLifespan(species);
 
             _agents[spawned] = new Agent
             {
@@ -1048,18 +1699,42 @@ public sealed class World
                 SeekCooldown = 0,
                 WanderDirection = 0,
                 WanderTicksRemaining = 0,
+                // Âge de départ étalé sur toute l'espérance de vie de CET
+                // agent (pas 0 pour tout le monde) : sans ça, les 199
+                // agents initiaux meurent tous ensemble, et leurs enfants
+                // aussi -- exactement le piège de vague de cohorte des
+                // arbres (s11), transposé aux agents.
+                Age = (uint)(_rngAgents.NextDouble() * lifespan),
+                LifespanTicks = lifespan,
+                Sex = (byte)(_rngAgents.NextDouble() < 0.5 ? 0 : 1),
+                PregnantUntil = 0,
+                PendingFatherId = Agent.UnknownParent,
+                CauseOfDeath = 0,
                 SearchFailureStreak = 0,
                 TicksIdle = 0,
                 TicksMoving = 0,
                 TicksSeeking = 0,
                 TicksEating = 0,
                 HungerAtLastMealStart = 0,
+            LastSeekOutcome = SeekOutcome.NeverSearched,
             };
             spawned++;
         }
 
         AliveCount = spawned;
-        AgentSpawnCapped = spawned < _agents.Length;
+        AgentSpawnCapped = spawned < count;
+    }
+
+    private uint RollLifespan(SpeciesType species)
+    {
+        if (species.LifespanVarianceTicks == 0)
+        {
+            return species.LifespanTicks;
+        }
+
+        double roll = (_rngAgents.NextDouble() * (species.LifespanVarianceTicks * 2 + 1)) - species.LifespanVarianceTicks;
+        double lifespan = species.LifespanTicks + roll;
+        return (uint)Math.Max(1, lifespan);
     }
 
     private int ComputeDeathTick(VegetationType typeInfo)

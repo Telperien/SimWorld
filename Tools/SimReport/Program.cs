@@ -40,6 +40,7 @@ for (int i = 0; i < args.Length; i++)
 string basePath = AppContext.BaseDirectory;
 var terrainCatalog = TerrainCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "terrain.json")));
 var vegetationCatalog = VegetationCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "vegetation.json")));
+var speciesCatalog = SpeciesCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "species.json")));
 var baseConfig = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "data", "simulation.json")));
 
 // Densite d'agents en hausse, capacite vegetale en baisse : force une
@@ -51,7 +52,7 @@ var config = scarcity
 vegetationCatalog.TryGetId("bush", out byte bushType);
 vegetationCatalog.TryGetId("tree", out byte treeType);
 
-var world = new World(seed, size, terrainCatalog, vegetationCatalog, config);
+var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, config);
 
 // Stimulus externe (comme un clic joueur) : Rng local au rapport, seede
 // sur --seed pour rester reproductible run-a-run, mais hors de World
@@ -63,12 +64,29 @@ if (world.AgentSpawnCapped)
     Console.WriteLine("ATTENTION: le spawn d'agents a atteint sa limite de tentatives (carte quasi sans tuiles walkable ?)");
 }
 
-var samples = new List<(int Tick, int Pop, int BushYoung, int BushMature, int Tree, int Grass, int Ash)>();
+const int ageBuckets = 10;
+
+var samples = new List<(int Tick, int Pop, int BushYoung, int BushMature, int Tree, int Grass, int Ash,
+    int HungerDeathsCum, int AgeDeathsCum, int BirthsCum, int BirthsRefusedCum, double AgentStdDev, int[] AgeHistogram)>();
 
 void Sample(int tick)
 {
     int bushMature = world.CountMatureVegetationOfType(bushType);
     int bushTotal = world.CountVegetationOfType(bushType);
+
+    SpeciesType speciesForHistogram = speciesCatalog.Get(0);
+    int[] ageHistogram = new int[ageBuckets];
+    if (world.AliveCount > 0)
+    {
+        uint bucketWidth = Math.Max(1, speciesForHistogram.LifespanTicks / ageBuckets);
+        for (int i = 0; i < world.AliveCount; i++)
+        {
+            uint age = world.GetAgent(i).Age;
+            int bucket = (int)Math.Min(ageBuckets - 1, age / bucketWidth);
+            ageHistogram[bucket]++;
+        }
+    }
+
     samples.Add((
         tick,
         world.AliveCount,
@@ -76,7 +94,13 @@ void Sample(int tick)
         bushMature,
         world.CountVegetationOfType(treeType),
         world.GrassTileCount,
-        world.AshTileCount));
+        world.AshTileCount,
+        world.GetDeathCount(DeathCause.Hunger),
+        world.GetDeathCount(DeathCause.Age),
+        world.BirthsTotal,
+        world.BirthsRefusedArrayFull,
+        world.AgentDensityStdDev(),
+        ageHistogram));
 }
 
 Sample(0);
@@ -107,10 +131,20 @@ string flags = (scarcity ? " --scarcity" : "") + (fire ? $" --fire (interval={fi
 Console.WriteLine($"SimReport -- seed={seed} size={size} ticks={ticks}{flags}");
 Console.WriteLine($"Duree: {stopwatch.Elapsed.TotalSeconds:F2}s");
 Console.WriteLine();
-Console.WriteLine($"{"tick",8} {"pop",6} {"bjeune",7} {"bmur",6} {"arbre",6} {"herbe",8} {"cendre",7}");
-foreach (var s in samples)
+Console.WriteLine($"{"tick",8} {"pop",6} {"bjeune",7} {"bmur",6} {"arbre",6} {"herbe",8} {"cendre",7} " +
+    $"{"faimD",6} {"ageD",5} {"naisD",6} {"refusD",7} {"stdAgt",7}");
+for (int s = 0; s < samples.Count; s++)
 {
-    Console.WriteLine($"{s.Tick,8} {s.Pop,6} {s.BushYoung,7} {s.BushMature,6} {s.Tree,6} {s.Grass,8} {s.Ash,7}");
+    var cur = samples[s];
+    // Deltas par intervalle (pas cumules) : montre ce qui tue/nait
+    // PENDANT chaque fenetre, pas seulement le total sur tout le run
+    // (session 14b, diagnostic boom-bust).
+    int hungerD = s == 0 ? cur.HungerDeathsCum : cur.HungerDeathsCum - samples[s - 1].HungerDeathsCum;
+    int ageD = s == 0 ? cur.AgeDeathsCum : cur.AgeDeathsCum - samples[s - 1].AgeDeathsCum;
+    int birthsD = s == 0 ? cur.BirthsCum : cur.BirthsCum - samples[s - 1].BirthsCum;
+    int refusedD = s == 0 ? cur.BirthsRefusedCum : cur.BirthsRefusedCum - samples[s - 1].BirthsRefusedCum;
+    Console.WriteLine($"{cur.Tick,8} {cur.Pop,6} {cur.BushYoung,7} {cur.BushMature,6} {cur.Tree,6} {cur.Grass,8} {cur.Ash,7} " +
+        $"{hungerD,6} {ageD,5} {birthsD,6} {refusedD,7} {cur.AgentStdDev,7:F2}");
 }
 
 int idle = 0, moving = 0, seeking = 0, eating = 0;
@@ -157,6 +191,18 @@ for (int y = 0; y < size; y++)
 
 Console.WriteLine($"Herbe par quadrant (fin de run):       HG={grassQuadrants[0]} HD={grassQuadrants[1]} BG={grassQuadrants[2]} BD={grassQuadrants[3]}");
 
+// Agents par quadrant (session 14d, question 2b) : correle-t-on le
+// deficit de vegetation d'un quadrant a sa densite d'agents (broutage)
+// plutot qu'a un artefact de repousse ?
+int[] agentQuadrants = new int[4];
+for (int i = 0; i < world.AliveCount; i++)
+{
+    Agent agent = world.GetAgent(i);
+    int quadrant = (agent.X < half ? 0 : 1) + (agent.Y < half ? 0 : 2);
+    agentQuadrants[quadrant]++;
+}
+Console.WriteLine($"Agents par quadrant (fin de run):      HG={agentQuadrants[0]} HD={agentQuadrants[1]} BG={agentQuadrants[2]} BD={agentQuadrants[3]}");
+
 // Mesure de clusterisation (etape 6, session 13) : distance moyenne au
 // buisson mur le plus proche pour un point d'herbe TIRE AU HASARD (pas
 // seulement les mourants) -- Rng local au rapport, hors de World, jamais
@@ -196,6 +242,64 @@ Console.WriteLine();
 Console.WriteLine($"Repas cumules: {world.MealsEaten}");
 Console.WriteLine("Morts par cause:");
 Console.WriteLine($"  Faim: {world.GetDeathCount(DeathCause.Hunger)}");
+Console.WriteLine($"  Age : {world.GetDeathCount(DeathCause.Age)}");
+
+Console.WriteLine();
+Console.WriteLine($"Naissances cumulees: {world.BirthsTotal}");
+Console.WriteLine($"Naissances refusees (tableau plein): {world.BirthsRefusedArrayFull}");
+Console.WriteLine($"Naissances perdues (tuile non sure): {world.BirthsLostToUnsafeTile}");
+
+// Histogrammes des ages a 4 instants choisis APRES COUP sur la courbe
+// de population deja collectee (session 14b, diagnostic boom-bust) :
+// baseline (premier echantillon), pic (argmax pop), creux suivant le
+// pic (argmin pop apres l'index du pic), fin de run. Revele les vagues
+// de cohorte si un echo demographique est la cause du crash.
+{
+    SpeciesType speciesForHistogram = speciesCatalog.Get(0);
+    uint bucketWidth = Math.Max(1, speciesForHistogram.LifespanTicks / ageBuckets);
+
+    int peakIdx = 0;
+    for (int s = 1; s < samples.Count; s++)
+    {
+        if (samples[s].Pop > samples[peakIdx].Pop)
+        {
+            peakIdx = s;
+        }
+    }
+
+    int troughIdx = peakIdx;
+    for (int s = peakIdx + 1; s < samples.Count; s++)
+    {
+        if (samples[s].Pop < samples[troughIdx].Pop)
+        {
+            troughIdx = s;
+        }
+    }
+
+    var picks = new (string Label, int Index)[]
+    {
+        ("Baseline (premier echantillon)", 0),
+        ("Pic de population", peakIdx),
+        ("Creux apres le pic", troughIdx),
+        ("Fin de run", samples.Count - 1),
+    };
+
+    Console.WriteLine();
+    Console.WriteLine("--- Histogrammes des ages (session 14b, diagnostic) ---");
+    foreach (var (label, idx) in picks)
+    {
+        var s = samples[idx];
+        Console.WriteLine();
+        Console.WriteLine($"{label} -- tick {s.Tick}, pop {s.Pop} :");
+        for (int b = 0; b < ageBuckets; b++)
+        {
+            uint lower = (uint)b * bucketWidth;
+            uint upper = (uint)(b + 1) * bucketWidth;
+            double pct = s.Pop > 0 ? 100.0 * s.AgeHistogram[b] / s.Pop : 0.0;
+            Console.WriteLine($"  [{lower,7}, {upper,7}) : {s.AgeHistogram[b],6}  ({pct,5:F1}%)");
+        }
+    }
+}
 
 Console.WriteLine();
 Console.WriteLine($"Feu: {world.TilesBurnedCumulative} tuiles brulees (cumule), {world.VegetationLostToFire} vegetation perdue au feu");
@@ -240,6 +344,16 @@ if (totalHungerDeaths > 0)
         }
         double pct = 100.0 * terrainHistogram[t] / totalHungerDeaths;
         Console.WriteLine($"  {name,-8} : {terrainHistogram[t],6}  ({pct,5:F1}%)");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("Issue du dernier cycle de recherche avant la mort (session 14d) :");
+    int[] seekOutcomeHistogram = world.GetDeathSeekOutcomeHistogram();
+    string[] seekOutcomeLabels = { "Jamais cherche", "Buisson trouve (BFS)", "Suivait le gradient", "Errance aveugle" };
+    for (int o = 0; o < seekOutcomeHistogram.Length; o++)
+    {
+        double pct = 100.0 * seekOutcomeHistogram[o] / totalHungerDeaths;
+        Console.WriteLine($"  {seekOutcomeLabels[o],-22} : {seekOutcomeHistogram[o],6}  ({pct,5:F1}%)");
     }
 
     Console.WriteLine();

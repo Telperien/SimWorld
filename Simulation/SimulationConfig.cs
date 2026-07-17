@@ -27,6 +27,12 @@ public sealed record SimulationConfig
     public required double VegetationSpontaneousChance { get; init; }
     public required byte WanderPersistenceTicks { get; init; }
     public required double WanderTurnChance { get; init; }
+    public required int MateSearchRadius { get; init; }
+    public required int AgentCapacityMultiplier { get; init; }
+    public required double BaseConceptionChance { get; init; }
+    public required double TargetFoodPerCapita { get; init; }
+    public required double FoodGradientDiffusionRate { get; init; }
+    public required int FoodGradientDiffusionIterations { get; init; }
 
     public static SimulationConfig Load(string json)
     {
