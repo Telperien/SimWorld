@@ -4,37 +4,56 @@ namespace Tests;
 
 public class VegetationTests
 {
-    private static TerrainCatalog LoadCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
-        return TerrainCatalog.Load(File.ReadAllText(path));
-    }
 
-    private static VegetationCatalog LoadVegetationCatalog()
+    [Fact]
+    public void ForceSpawnVegetation_NeverThrows_OnFullCapacity()
     {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
-        return VegetationCatalog.Load(File.ReadAllText(path));
-    }
+        // Session filet : signalé par une revue externe comme un risque
+        // d'IndexOutOfRange sans garde de capacité. Lecture du code
+        // (World.cs, ForceSpawnVegetation) montre que la garde EXISTE
+        // déjà (RemoveBushAt(0)/RemoveTreeAt(0) si le tableau est plein
+        // avant de planter) -- ce test est une preuve de non-régression,
+        // pas un fix : densité volontairement minuscule pour saturer les
+        // deux tableaux dès la construction, puis ForceSpawnVegetation
+        // appelée sur bien plus de tuiles que la capacité.
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation() with { BushDensity = 0.01, TreeDensity = 0.01 };
+        var world = new World(seed: 12, size: 32, catalog, vegetation, species, config);
 
-    private static SpeciesCatalog LoadSpeciesCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
-        return SpeciesCatalog.Load(File.ReadAllText(path));
-    }
+        catalog.TryGetId("grass", out byte grass);
+        vegetation.TryGetId("bush", out byte bushType);
+        vegetation.TryGetId("tree", out byte treeType);
+        byte bushMature = (byte)vegetation.Get(bushType).MatureStage;
+        byte treeMature = (byte)vegetation.Get(treeType).MatureStage;
 
-    private static SimulationConfig LoadSimulationConfig()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
-        return SimulationConfig.Load(File.ReadAllText(path));
+        for (int i = 0; i < 30; i++)
+        {
+            int x = i % world.Size;
+            int y = i / world.Size;
+            world.SetTerrainId(x, y, grass);
+            world.ForceSpawnVegetation(x, y, bushType, bushMature);
+        }
+        for (int i = 0; i < 30; i++)
+        {
+            int x = (i + 30) % world.Size;
+            int y = (i + 30) / world.Size;
+            world.SetTerrainId(x, y, grass);
+            world.ForceSpawnVegetation(x, y, treeType, treeMature);
+        }
+
+        Assert.True(world.BushCount <= (int)(config.BushDensity * world.Size * world.Size) + 1);
+        Assert.True(world.TreeCount <= (int)(config.TreeDensity * world.Size * world.Size) + 1);
     }
 
     [Fact]
     public void Vegetation_YoungBushes_GrowIntoMature()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 2, size: 32, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -56,10 +75,10 @@ public class VegetationTests
     [Fact]
     public void Vegetation_SpreadsOnEmptyGrass_OverTime()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 15, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -86,10 +105,10 @@ public class VegetationTests
     [Fact]
     public void Bush_Disappears_WhenFoodDepleted()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 50, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -122,13 +141,13 @@ public class VegetationTests
     [Fact]
     public void Vegetation_RegrowsAfterDelay_NotInstantly()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
         // Capacité large + taux de diffusion haut : test déterministe qui
         // ne dépend pas du tuning réel du jeu (VegetationSpreadChance en
         // conditions normales est bien plus bas).
-        var config = LoadSimulationConfig() with
+        var config = TestCatalogs.LoadSimulation() with
         {
             BushDensity = 1.0,
             TreeDensity = 1.0,
@@ -172,10 +191,10 @@ public class VegetationTests
     [Fact]
     public void Bushes_RecolonizeDepletedZone_Locally()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig() with { VegetationSpreadChance = 0.8, VegetationSpontaneousChance = 0.0 };
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation() with { VegetationSpreadChance = 0.8, VegetationSpontaneousChance = 0.0 };
         var world = new World(seed: 71, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -250,10 +269,10 @@ public class VegetationTests
     [Fact]
     public void Bushes_CanRecolonize_FullyClearedRegion()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig() with { VegetationSpontaneousChance = 0.05 };
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation() with { VegetationSpontaneousChance = 0.05 };
         var world = new World(seed: 72, size: 32, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -287,10 +306,10 @@ public class VegetationTests
     [InlineData(7)]
     public void Vegetation_SpatialDistribution_IsBalanced(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         for (int i = 0; i < 2_000_000; i++)
@@ -353,10 +372,10 @@ public class VegetationTests
     [Fact]
     public void Ash_RecoversToGrass_OverTime()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig() with { AshToGrassChance = 0.9 };
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation() with { AshToGrassChance = 0.9 };
         var world = new World(seed: 80, size: 16, catalog, vegetation, species, config);
 
         catalog.TryGetId("ash", out byte ash);
@@ -395,10 +414,10 @@ public class VegetationTests
     [Fact]
     public void Tree_Dies_AndFreesSlot()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 55, size: 16, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -420,10 +439,10 @@ public class VegetationTests
     [InlineData(7)]
     public void Trees_StabilizeOverLongRun(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         vegetation.TryGetId("tree", out byte treeType);
@@ -458,7 +477,7 @@ public class VegetationTests
     [Fact]
     public void Vegetation_TimeScale_IsSlowerThanHungerCycle()
     {
-        var config = LoadSimulationConfig();
+        var config = TestCatalogs.LoadSimulation();
 
         // Décision de design de s15 : la végétation doit être au moins
         // un ordre de grandeur plus lente que le cycle de faim, sinon
@@ -476,10 +495,10 @@ public class VegetationTests
     [InlineData(7)]
     public void Fire_DestroysSignificantVegetation(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         vegetation.TryGetId("bush", out byte bushType);

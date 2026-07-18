@@ -838,3 +838,107 @@ récolte/manger (le mécanisme lui-même, pas l'état FSM), territoires.
   depuis la session de diagnostic de perf, toujours pas fait.
 - Mesure de la période d'oscillation une fois une densité stable
   trouvée.
+
+## Session filet — Verrouiller le harnais avant d'empiler du gameplay
+
+### Contexte
+Deux revues externes ont signalé des trous dans le filet de sécurité
+(déterminisme, CI, zéro-allocation) — trous qui existaient déjà quand
+6 tests cassés sont passés inaperçus depuis la session 18 (jamais vus
+tant que la suite complète n'a pas été relancée manuellement en
+session 19c). Session sans AUCUN gameplay : vérifie/répare l'outillage
+qui aurait dû attraper ces problèmes plus tôt.
+
+### 1. Golden-hash — verdict factuel
+Vérifié par lecture directe : le test **existe**
+(`Tests/DeterminismTests.cs`, `Golden_Hash_MatchesCommittedValue`) et
+**tourne en CI** (`.github/workflows/ci.yml` exécute `dotnet test
+Tests/Tests.csproj`, qui l'inclut sans filtre). Il n'était PAS
+manquant. Les revues externes étaient probablement basées sur un état
+antérieur à la session 19c, ou confondaient "jamais vu tourner avec
+succès sur GitHub Actions" avec "n'existe pas dans le code" — un trou
+de PROCESS (personne n'a poussé/vérifié la CI entre s18 et s19c), pas
+de config.
+
+### 2. CI stricte
+- Déclencheurs dédoublonnés : `push` limité à `branches: [master]` (au
+  lieu de `["**"]`), qui se combinait avec `pull_request` pour lancer
+  deux fois le même commit sur une PR interne.
+- `dotnet test` faisait déjà échouer le job sur un test rouge — ce
+  mécanisme fonctionnait déjà correctement, le vrai trou était le
+  process de vérification, pas la config CI.
+- `WorldSim.csproj` (`/scripts`, `Godot.NET.Sdk/4.7.1`) n'était JAMAIS
+  compilé en CI. Ajouté (`dotnet restore`/`build WorldSim.csproj`).
+  Vérifié : le SDK Godot.NET vient bien de NuGet, restore + build
+  réussissent localement (Windows, mais avec restore propre depuis
+  NuGet, pas depuis un cache Godot préexistant) -- la preuve définitive
+  reste le premier run réel sur `ubuntu-latest`.
+
+### 3. Le feu qui alloue
+Confirmé par lecture : `_activeCurrent`/`_activeNext`/`_searchQueue`
+(`World.cs`) étaient des `List<int>` sans capacité préallouée --
+`List.Add` au-delà de la capacité par défaut réalloue en plein tick à
+30 Hz pendant un incendie, invisible du test zéro-alloc existant (qui
+n'allume jamais de feu). Préallouées : `_activeCurrent`/`_activeNext`
+à 512, `_searchQueue` à `(2×MaxFoodSearchRadius+1)²` (pire cas exact
+de la boîte BFS, calculé depuis la config au constructeur). Nouveau
+test `Tick_AllocatesNothing_WithFireAndActiveAgents` (feu actif +
+agent forcé en `Harvesting`, zéro octet mesuré) -- vert du premier
+coup avec les capacités retenues.
+
+### 4. `ForceSpawnVegetation`
+Vérifié par lecture puis par test dédié
+(`ForceSpawnVegetation_NeverThrows_OnFullCapacity`) : la garde de
+capacité (`RemoveBushAt(0)`/`RemoveTreeAt(0)` si le tableau est plein)
+**existait déjà** pour les deux types. Pas un fix, un test de
+non-régression -- vert du premier coup.
+
+### 5. Nettoyage
+- `Tests/TestCatalogs.cs` (nouveau) centralise les 4 chargeurs de
+  catalogue, dupliqués à l'identique dans 7 fichiers de test. Les
+  helpers spécialisés (`LoadFertileConfig`, `MakeFertileCouple`)
+  restent locaux.
+- `DeriveSeed` (`World.cs`) appliquait un seul tour de mix FNV sur le
+  seed brut -- insuffisant pour décorréler des seeds proches (42 vs
+  43). Un vrai finaliseur SplitMix64 (algorithme public, constantes
+  standard) est maintenant appliqué au seed brut avant dérivation des
+  4 flux. `Mix()` lui-même reste inchangé (accumulateur de hash
+  chaîné correct sur `Hash()`). Golden-hash cassé par ce changement,
+  recalculé : `5609630853180351789` → `16039018715249892889`.
+- Messages d'erreur JSON au boot : un petit `ReadJsonOrThrow` local
+  (pas dans `/Simulation`, qui interdit `System.IO` -- dupliqué dans
+  `Tests/TestCatalogs.cs`, `Tools/SimReport/Program.cs`,
+  `Tools/RenderDump/Program.cs`, `scripts/WorldRenderer.cs` avec
+  l'API Godot `FileAccess`) nomme le fichier et le chemin attendus au
+  lieu d'une exception brute.
+
+### Effet de bord du fix SplitMix64 -- deux tests rendus fragiles à un seed
+Changer `DeriveSeed` reshuffle le flux RNG pour TOUS les seeds. Deux
+tests dépendaient d'un résultat stochastique précis pour un seed
+donné, révélés cassés par ce changement (pas un bug du fix lui-même) :
+- `Tick_AllocatesNothing_WithFireAndActiveAgents` (nouveau, point 3) :
+  dépendait du déclenchement probabiliste de la récolte pour observer
+  un agent `Harvesting`. Rendu déterministe (agent forcé via seam de
+  test) plutôt que de rechasser un seed chanceux -- plus robuste à
+  tout futur changement de flux RNG.
+- `Agents_DieOfHunger_InScarcityScenario` : dépendait de la rareté
+  seule pour garantir la famine -- mais depuis le fix du deadlock
+  Eating/Harvest (19c), un agent affamé peut désormais activement
+  aller récolter même les buissons épars d'une densité "rare",
+  rendant la famine non garantie par la seule rareté. `BaseHarvestChance
+  = 0` ajouté (interdit toute récolte) pour restaurer une pénurie
+  absolue, conforme à l'intention originale du test.
+
+### Hors scope (respecté)
+Pas de refactor de `World.cs` en systèmes séparés (prévu juste avant
+les foyers). Aucun nouveau gameplay.
+
+### Vérification
+- `dotnet build` (Simulation, Tests, Tools/SimReport, Tools/RenderDump,
+  WorldSim.csproj) : tous verts.
+- `dotnet test` (suite rapide/moyenne, hors tests 1-2M ticks déjà
+  couverts par balayage SimReport en s19c) : 50/50 verts.
+- Golden-hash recalculé, signalé.
+- Grep `System.IO`/`Godot` dans `/Simulation` : rien, confirmé après
+  tous les changements de cette session.
+- `git status` propre, commit unique, permission avant push.

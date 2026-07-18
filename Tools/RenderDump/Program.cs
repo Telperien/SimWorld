@@ -12,10 +12,21 @@ const int seed = 42;
 const int size = 512;
 
 string basePath = AppContext.BaseDirectory;
-var terrainCatalog = TerrainCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "terrain.json")));
-var vegetationCatalog = VegetationCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "vegetation.json")));
-var speciesCatalog = SpeciesCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "species.json")));
-var config = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "data", "simulation.json")));
+var terrainCatalog = TerrainCatalog.Load(ReadJsonOrThrow(Path.Combine(basePath, "data", "terrain.json")));
+var vegetationCatalog = VegetationCatalog.Load(ReadJsonOrThrow(Path.Combine(basePath, "data", "vegetation.json")));
+var speciesCatalog = SpeciesCatalog.Load(ReadJsonOrThrow(Path.Combine(basePath, "data", "species.json")));
+var config = SimulationConfig.Load(ReadJsonOrThrow(Path.Combine(basePath, "data", "simulation.json")));
+
+// Session filet : cf. Tools/SimReport/Program.cs, meme raisonnement.
+static string ReadJsonOrThrow(string path)
+{
+    if (!File.Exists(path))
+    {
+        throw new FileNotFoundException(
+            $"fichier de configuration introuvable : '{Path.GetFileName(path)}' attendu a '{path}'", path);
+    }
+    return File.ReadAllText(path);
+}
 
 var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, config);
 

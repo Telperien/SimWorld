@@ -4,29 +4,6 @@ namespace Tests;
 
 public class ClanTests
 {
-    private static TerrainCatalog LoadCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
-        return TerrainCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static VegetationCatalog LoadVegetationCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
-        return VegetationCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SpeciesCatalog LoadSpeciesCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
-        return SpeciesCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SimulationConfig LoadSimulationConfig()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
-        return SimulationConfig.Load(File.ReadAllText(path));
-    }
 
     // Catalogue synthetique : mature immediatement, gestation courte,
     // conception quasi garantie -- meme patron que ReproductionTests
@@ -42,7 +19,7 @@ public class ClanTests
 
     private static SimulationConfig LoadFertileConfig()
     {
-        var baseConfig = LoadSimulationConfig();
+        var baseConfig = TestCatalogs.LoadSimulation();
         // BaseHarvestChance=0 (session 19c) : cf. ReproductionTests --
         // depuis que manger n'est plus gaté par un état exclusif, un agent
         // ambiant affamé peut redevenir cueilleur et regarnir le pool de
@@ -118,10 +95,10 @@ public class ClanTests
     [Fact]
     public void Agent_EatsFromClanPool_WithoutMoving()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 10, size: 128, catalog, vegetation, species, config);
 
         Agent before = world.GetAgent(0);
@@ -144,10 +121,10 @@ public class ClanTests
     [Fact]
     public void Harvester_FillsPool_DoesNotFillOwnHunger()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 11, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -181,8 +158,8 @@ public class ClanTests
     [Fact]
     public void Newborn_InheritsMotherClan()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
         var species = MakeFertileSpeciesCatalog();
         var config = LoadFertileConfig();
         var world = MakeFertileCouple(catalog, vegetation, species, config, seed: 300);
@@ -218,8 +195,8 @@ public class ClanTests
     [Fact]
     public void Agents_CannotReproduce_AcrossClans()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
         var species = MakeFertileSpeciesCatalog();
         var config = LoadFertileConfig();
         var world = MakeFertileCouple(catalog, vegetation, species, config, seed: 301);
@@ -242,10 +219,10 @@ public class ClanTests
     [Fact]
     public void Clans_SpawnInSpatialClusters()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 55, size: 512, catalog, vegetation, species, config);
 
         // Marge genereuse (1.5x) au-dessus du rayon de grappe nominal :
@@ -311,10 +288,10 @@ public class ClanTests
     [InlineData(7)]
     public void Clan_PoolNeverCollapsesToZero_InNormalConditions(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         for (int i = 0; i < 2_000_000; i++)

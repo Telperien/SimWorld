@@ -4,37 +4,14 @@ namespace Tests;
 
 public class DeterminismTests
 {
-    private static TerrainCatalog LoadCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
-        return TerrainCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static VegetationCatalog LoadVegetationCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
-        return VegetationCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SpeciesCatalog LoadSpeciesCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
-        return SpeciesCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SimulationConfig LoadSimulationConfig()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
-        return SimulationConfig.Load(File.ReadAllText(path));
-    }
 
     [Fact]
     public void Agent_Id_RemainsValid_AfterMultipleDeathsAndCompactions()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 30, size: 64, catalog, vegetation, species, config);
 
         int trackedIndex = world.AliveCount - 1;
@@ -78,10 +55,10 @@ public class DeterminismTests
     [Fact]
     public void Golden_Hash_MatchesCommittedValue()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 12345, size: 128, catalog, vegetation, species, config);
 
         world.Execute(new SpawnFire(64, 64, radius: 3));
@@ -91,6 +68,6 @@ public class DeterminismTests
             world.Tick(World.TickIntervalSeconds);
         }
 
-        Assert.Equal(5609630853180351789UL, world.Hash());
+        Assert.Equal(16039018715249892889UL, world.Hash());
     }
 }

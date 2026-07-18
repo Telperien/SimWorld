@@ -180,13 +180,22 @@ public sealed class World
     private long _deathTicksEatingSum;
     private long _deathHungerAtLastMealSum;
 
-    private List<int> _activeCurrent = new();
-    private List<int> _activeNext = new();
+    // Capacité initiale (pas 0, cf. Simulation filet) : sans ça,
+    // List.Add réalloue en plein tick dès qu'un incendie dépasse la
+    // capacité par défaut (4/8 éléments) -- une allocation tas à 30 Hz,
+    // invisible tant qu'aucun test zéro-alloc n'allume de feu. 512
+    // couvre un événement de feu typique (rayons observés en usage
+    // réel/SimReport, ex. 5-6) sans jamais s'en approcher ; ajustée si
+    // un feu plus large la dépasse en pratique (mesuré, pas deviné).
+    private List<int> _activeCurrent = new(512);
+    private List<int> _activeNext = new(512);
 
     // Buffer de travail pour la recherche BFS : entièrement écrasé (via
     // generation-stamp) à chaque appel, jamais lu entre deux appels.
     // Exclu de Hash() volontairement (cf. CLAUDE.md, Déterminisme).
-    private readonly List<int> _searchQueue = new();
+    // Capacité = pire cas exact de la boîte de recherche
+    // (2*MaxFoodSearchRadius+1)², fixée au constructeur (cf. filet).
+    private readonly List<int> _searchQueue;
     private int _searchGenerationCounter;
 
     public int Size { get; }
@@ -312,6 +321,9 @@ public sealed class World
         _config = config;
         _terrain = new byte[size * size];
         _burning = new bool[size * size];
+
+        int searchBoxSide = 2 * config.MaxFoodSearchRadius + 1;
+        _searchQueue = new List<int>(searchBoxSide * searchBoxSide);
 
         _rngWorldGen = new Rng(DeriveSeed(seed, WorldGenStreamId));
         _rngFire = new Rng(DeriveSeed(seed, FireStreamId));
@@ -1050,9 +1062,26 @@ public sealed class World
         hash *= FnvPrime;
     }
 
+    // Session filet : un seul tour de Mix (FNV) sur le seed brut ne
+    // décorrèle pas suffisamment des seeds bruts proches (ex. 42 vs 43)
+    // -- les bits bas restent trop similaires après une seule passe.
+    // Finaliseur SplitMix64 complet (algorithme public, constantes
+    // standard) appliqué au seed brut AVANT de dériver les flux, pour
+    // un avalanche correct même sur des seeds faibles/proches. Mix()
+    // lui-même reste inchangé (accumulateur de hash chaîné correct sur
+    // de nombreux appels, cf. Hash()).
+    private static ulong SplitMix64(ulong x)
+    {
+        x += 0x9E3779B97F4A7C15UL;
+        ulong z = x;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+        return z ^ (z >> 31);
+    }
+
     private static ulong DeriveSeed(int seed, ulong streamId)
     {
-        ulong derived = (ulong)seed;
+        ulong derived = SplitMix64((ulong)seed);
         Mix(ref derived, streamId);
         return derived;
     }

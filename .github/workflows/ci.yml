@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -16,15 +16,17 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore (Simulation + Tests only)
+      - name: Restore
         run: |
           dotnet restore Simulation/Simulation.csproj
           dotnet restore Tests/Tests.csproj
+          dotnet restore WorldSim.csproj
 
       - name: Build (Release)
         run: |
           dotnet build Simulation/Simulation.csproj --no-restore --configuration Release
           dotnet build Tests/Tests.csproj --no-restore --configuration Release
+          dotnet build WorldSim.csproj --no-restore --configuration Release
 
       - name: Test (Release)
         run: dotnet test Tests/Tests.csproj --no-build --configuration Release --verbosity normal

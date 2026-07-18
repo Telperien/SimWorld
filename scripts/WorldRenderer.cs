@@ -1,3 +1,4 @@
+using System.IO;
 using Godot;
 using Simulation;
 
@@ -19,17 +20,10 @@ public partial class WorldRenderer : Sprite2D
 
     public override void _Ready()
     {
-        string terrainJson = FileAccess.GetFileAsString("res://data/terrain.json");
-        _catalog = TerrainCatalog.Load(terrainJson);
-
-        string vegetationJson = FileAccess.GetFileAsString("res://data/vegetation.json");
-        _vegetationCatalog = VegetationCatalog.Load(vegetationJson);
-
-        string speciesJson = FileAccess.GetFileAsString("res://data/species.json");
-        _speciesCatalog = SpeciesCatalog.Load(speciesJson);
-
-        string simulationJson = FileAccess.GetFileAsString("res://data/simulation.json");
-        var config = SimulationConfig.Load(simulationJson);
+        _catalog = TerrainCatalog.Load(ReadJsonOrThrow("res://data/terrain.json"));
+        _vegetationCatalog = VegetationCatalog.Load(ReadJsonOrThrow("res://data/vegetation.json"));
+        _speciesCatalog = SpeciesCatalog.Load(ReadJsonOrThrow("res://data/species.json"));
+        var config = SimulationConfig.Load(ReadJsonOrThrow("res://data/simulation.json"));
 
         World = new World(Seed, Size, _catalog, _vegetationCatalog, _speciesCatalog, config);
 
@@ -38,6 +32,20 @@ public partial class WorldRenderer : Sprite2D
         Texture = _texture;
 
         Redraw();
+    }
+
+    // Session filet : FileAccess.GetFileAsString (Godot) renvoie une
+    // chaine vide sans lever si le fichier manque -- Load() echouerait
+    // alors plus loin avec un message generique ("JSON is empty or
+    // invalid") sans dire QUEL fichier. Verifie l'existence d'abord
+    // pour un message qui nomme le fichier attendu.
+    private static string ReadJsonOrThrow(string resPath)
+    {
+        if (!Godot.FileAccess.FileExists(resPath))
+        {
+            throw new FileNotFoundException($"fichier de configuration introuvable : '{resPath}'", resPath);
+        }
+        return Godot.FileAccess.GetFileAsString(resPath);
     }
 
     public override void _Process(double delta)

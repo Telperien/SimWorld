@@ -4,29 +4,6 @@ namespace Tests;
 
 public class FireTests
 {
-    private static TerrainCatalog LoadCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
-        return TerrainCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static VegetationCatalog LoadVegetationCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
-        return VegetationCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SpeciesCatalog LoadSpeciesCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
-        return SpeciesCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SimulationConfig LoadSimulationConfig()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
-        return SimulationConfig.Load(File.ReadAllText(path));
-    }
 
     private static void FillGrass(World world, TerrainCatalog catalog, int minX, int minY, int maxX, int maxY)
     {
@@ -43,10 +20,10 @@ public class FireTests
     [Fact]
     public void Fire_SpreadsOnFlammableTerrain()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 7, size: 32, catalog, vegetation, species, config);
         FillGrass(world, catalog, 10, 10, 20, 20);
         catalog.TryGetId("ash", out byte ash);
@@ -77,10 +54,10 @@ public class FireTests
     [Fact]
     public void Fire_StopsAtWater()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 7, size: 16, catalog, vegetation, species, config);
         catalog.TryGetId("grass", out byte grass);
         catalog.TryGetId("water", out byte water);
@@ -101,10 +78,10 @@ public class FireTests
     [Fact]
     public void Fire_BecomesAsh_AfterBurning()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 3, size: 16, catalog, vegetation, species, config);
         catalog.TryGetId("grass", out byte grass);
         catalog.TryGetId("ash", out byte ash);
@@ -122,10 +99,10 @@ public class FireTests
     [Fact]
     public void Fire_Propagation_IsDeterministic_ForSameSeed()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
 
         var a = new World(seed: 11, size: 32, catalog, vegetation, species, config);
         var b = new World(seed: 11, size: 32, catalog, vegetation, species, config);
@@ -147,10 +124,10 @@ public class FireTests
     [Fact]
     public void Trees_AreFlammable_AndBurnLikeTerrain()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 13, size: 16, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);

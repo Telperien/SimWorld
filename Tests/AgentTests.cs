@@ -4,29 +4,6 @@ namespace Tests;
 
 public class AgentTests
 {
-    private static TerrainCatalog LoadCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
-        return TerrainCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static VegetationCatalog LoadVegetationCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
-        return VegetationCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SpeciesCatalog LoadSpeciesCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
-        return SpeciesCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static SimulationConfig LoadSimulationConfig()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
-        return SimulationConfig.Load(File.ReadAllText(path));
-    }
 
     // Nombre de ticks réels nécessaires pour qu'un agent, sans jamais
     // manger, atteigne `threshold` de faim : `threshold` s'accumule par
@@ -68,10 +45,10 @@ public class AgentTests
     [Fact]
     public void Agents_SpawnOnlyOnWalkableTiles()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 5, size: 128, catalog, vegetation, species, config);
 
         // AgentCapacity est la taille du tableau (avec marge pour les
@@ -90,10 +67,10 @@ public class AgentTests
     [Fact]
     public void Agents_Count_MatchesRequestedDensity()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 1, size: 512, catalog, vegetation, species, config);
 
         // AgentCapacity est désormais la taille du TABLEAU (avec marge
@@ -106,10 +83,10 @@ public class AgentTests
     [Fact]
     public void Agents_Movement_IsDeterministic_ForSameSeed()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
 
         var a = new World(seed: 21, size: 128, catalog, vegetation, species, config);
         var b = new World(seed: 21, size: 128, catalog, vegetation, species, config);
@@ -126,13 +103,13 @@ public class AgentTests
     [Fact]
     public void Agent_Dies_WithoutFood_AfterThreshold()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
         // AllowStarvationDeath=true explicite (session 19b/19c) : ce test
         // vérifie la mécanique de mort de faim elle-même, désormais
         // désactivée par défaut.
-        var config = LoadSimulationConfig() with { AllowStarvationDeath = true };
+        var config = TestCatalogs.LoadSimulation() with { AllowStarvationDeath = true };
         var world = new World(seed: 3, size: 64, catalog, vegetation, species, config);
         MakeFoodless(world, catalog);
 
@@ -166,10 +143,10 @@ public class AgentTests
     [Fact]
     public void Agent_SeeksFood_WhenHungry()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 21, size: 128, catalog, vegetation, species, config);
 
         int seekTicks = TicksUntilHungerThreshold(config, config.HungerSeekThreshold);
@@ -195,14 +172,14 @@ public class AgentTests
     [Fact]
     public void Population_Extinguishes_OnFoodlessMap()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
         // Ce test exerce explicitement le mécanisme quand il est RALLUMÉ
         // (session 19b/19c : AllowStarvationDeath=false par défaut) --
         // sans cet override, la population survivrait indéfiniment,
         // affamée mais vivante, contredisant le nom du test.
-        var config = LoadSimulationConfig() with { AllowStarvationDeath = true };
+        var config = TestCatalogs.LoadSimulation() with { AllowStarvationDeath = true };
         var world = new World(seed: 4, size: 64, catalog, vegetation, species, config);
         MakeFoodless(world, catalog);
 
@@ -219,10 +196,10 @@ public class AgentTests
     [Fact]
     public void Agent_EatsFromMatureBush_HungerDecreases()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 6, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -247,10 +224,10 @@ public class AgentTests
     [Fact]
     public void Agent_DoesNotFreeze_WhenNoFoodReachable()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 90, size: 64, catalog, vegetation, species, config);
         MakeFoodless(world, catalog);
 
@@ -280,10 +257,10 @@ public class AgentTests
     [InlineData(7)]
     public void Population_Survives_LongRun(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 256, catalog, vegetation, species, config);
 
         for (int i = 0; i < 500_000; i++)
@@ -297,14 +274,19 @@ public class AgentTests
     [Fact]
     public void Agents_DieOfHunger_InScarcityScenario()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var baseConfig = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var baseConfig = TestCatalogs.LoadSimulation();
         // AllowStarvationDeath=true explicite (session 19b/19c) : ce test
         // vérifie la mécanique de mort de faim elle-même, désormais
-        // désactivée par défaut.
-        var scarcityConfig = baseConfig with { AgentDensity = 0.003, BushDensity = 0.005, TreeDensity = 0.002, AllowStarvationDeath = true };
+        // désactivée par défaut. BaseHarvestChance=0 (session filet) :
+        // depuis le fix du deadlock Eating/Harvest (19c), un agent
+        // affamé peut activement partir cueillir même les quelques
+        // buissons épars d'une densité "rare" -- la famine n'est plus
+        // garantie par la seule rareté. Interdire toute récolte rend la
+        // pénurie absolue, comme l'intention originale du test.
+        var scarcityConfig = baseConfig with { AgentDensity = 0.003, BushDensity = 0.005, TreeDensity = 0.002, AllowStarvationDeath = true, BaseHarvestChance = 0.0 };
         var world = new World(seed: 60, size: 128, catalog, vegetation, species, scarcityConfig);
 
         // Le pool du clan (session 18) demarre avec une reserve bancaire
@@ -317,7 +299,14 @@ public class AgentTests
             world.SetClanFoodPool(c, 0);
         }
 
-        for (int i = 0; i < 4000; i++)
+        // Marge relevee (4000 -> 12000, session filet) : le nouveau
+        // finaliseur SplitMix64 de DeriveSeed change le flux RNG pour
+        // TOUS les seeds -- une fenetre trop courte peut, par pure
+        // chance de positionnement initial, laisser ce seed particulier
+        // eviter la famine dans le temps imparti. Plus de marge rend le
+        // test robuste a un futur changement de flux RNG, plutot que de
+        // rechasser un seed "chanceux".
+        for (int i = 0; i < 12000; i++)
         {
             world.Tick(World.TickIntervalSeconds);
         }
@@ -328,12 +317,12 @@ public class AgentTests
     [Fact]
     public void Agent_Wandering_CoversDistance_LinearlyNotSqrt()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
         // Jamais affamé (seuil de recherche hors de portée) : seule
         // l'errance idle est en jeu, jamais le Seeking piloté par BFS.
-        var config = LoadSimulationConfig() with { HungerSeekThreshold = 255, IdleMoveChance = 1.0 };
+        var config = TestCatalogs.LoadSimulation() with { HungerSeekThreshold = 255, IdleMoveChance = 1.0 };
         var world = new World(seed: 91, size: 1024, catalog, vegetation, species, config);
 
         catalog.TryGetId("sand", out byte sand);
@@ -389,10 +378,10 @@ public class AgentTests
     [Fact]
     public void Agent_DiesOfOldAge_AtLifespan()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 95, size: 64, catalog, vegetation, species, config);
 
         int initialCount = world.AliveCount;
@@ -411,10 +400,10 @@ public class AgentTests
     [Fact]
     public void Agents_InitialAges_AreRandomized()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 96, size: 512, catalog, vegetation, species, config);
 
         uint firstAge = world.GetAgent(0).Age;
@@ -434,14 +423,14 @@ public class AgentTests
     [Fact]
     public void Agent_EscapesLargeDesert()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
         // HungerIncreasePerThink=0 isole la mécanique de navigation de
         // l'économie de survie -- l'objectif est de prouver que le
         // gradient guide l'agent jusqu'à une ressource hors de portée
         // BFS, pas de calibrer un timing de survie serré sur 50 tuiles.
-        var config = LoadSimulationConfig() with { HungerIncreasePerThink = 0 };
+        var config = TestCatalogs.LoadSimulation() with { HungerIncreasePerThink = 0 };
         var world = new World(seed: 300, size: 256, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -489,10 +478,10 @@ public class AgentTests
     [InlineData(7)]
     public void StarvationDeaths_AreNotBlindDeaths(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         for (int i = 0; i < 2_000_000; i++)
@@ -531,10 +520,10 @@ public class AgentTests
     [InlineData(7)]
     public void Population_NotArrayLimited(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         for (int i = 0; i < 2_000_000; i++)
@@ -555,10 +544,10 @@ public class AgentTests
     [InlineData(7)]
     public void Population_OscillationDoesNotDiverge(int seed)
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed, size: 512, catalog, vegetation, species, config);
 
         const int totalTicks = 2_000_000;
@@ -605,10 +594,10 @@ public class AgentTests
     [Fact]
     public void Agent_EatsPassively_WhileHarvesting()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 70, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -654,10 +643,10 @@ public class AgentTests
     [Fact]
     public void No_Starvation_Deadlock()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 71, size: 64, catalog, vegetation, species, config);
 
         catalog.TryGetId("grass", out byte grass);
@@ -720,10 +709,10 @@ public class AgentTests
     [Fact]
     public void Tick_StillAllocatesNothing()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
-        var species = LoadSpeciesCatalog();
-        var config = LoadSimulationConfig();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
         var world = new World(seed: 9, size: 128, catalog, vegetation, species, config);
 
         // Chauffe allongee (5 -> 500 ticks, session 18) : le declencheur
@@ -747,6 +736,76 @@ public class AgentTests
         }
         long after = GC.GetAllocatedBytesForCurrentThread();
 
+        Assert.Equal(0, after - before);
+    }
+
+    [Fact]
+    public void Tick_AllocatesNothing_WithFireAndActiveAgents()
+    {
+        // Session filet : Tick_StillAllocatesNothing n'allume jamais de
+        // feu -- _activeCurrent/_activeNext/_searchQueue (World.cs)
+        // n'étaient pas préalloués, une fuite d'allocation en plein
+        // tick à 30 Hz pendant un incendie restait donc invisible. Ce
+        // test combine feu actif ET cueilleurs (Seeking/Harvesting) sur
+        // la fenêtre mesurée.
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
+        var world = new World(seed: 11, size: 128, catalog, vegetation, species, config);
+
+        // Même raisonnement de chauffe que Tick_StillAllocatesNothing :
+        // laisse _agentPaths[index] et toute croissance ponctuelle
+        // légitime des listes de feu se produire AVANT la mesure.
+        for (int i = 0; i < 500; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        catalog.TryGetId("grass", out byte grass);
+        int centerX = world.Size / 2;
+        int centerY = world.Size / 2;
+        for (int y = centerY - 10; y <= centerY + 10; y++)
+        {
+            for (int x = centerX - 10; x <= centerX + 10; x++)
+            {
+                world.SetTerrainId(x, y, grass);
+            }
+        }
+        world.Execute(new SpawnFire(centerX, centerY, radius: 8));
+
+        // Forcé plutôt que laissé au déclencheur probabiliste
+        // (BaseHarvestChance) : ce test vérifie l'ABSENCE d'allocation
+        // sous Harvesting, pas la mécanique de déclenchement elle-même
+        // (déjà couverte ailleurs) -- dépendre de la chance RNG d'un
+        // seed donné rendrait ce test fragile à tout changement futur
+        // du flux RNG (cf. session filet, DeriveSeed/SplitMix64).
+        vegetation.TryGetId("bush", out byte bushType);
+        byte matureStage = (byte)vegetation.Get(bushType).MatureStage;
+        int bushX = 4, bushY = 4;
+        world.SetTerrainId(bushX, bushY, grass);
+        world.ForceSpawnVegetation(bushX, bushY, bushType, matureStage);
+        world.SetVegetationFoodRemaining(bushX, bushY, 100_000);
+        // Pool à sec pour tout le monde : sans ça, HarvestTick repasse
+        // l'agent en Idle dès que le pool de son clan atteint sa cible,
+        // ce qui pourrait arriver avant la fin des 50 ticks mesurés.
+        for (int c = 0; c < world.ClanCount; c++)
+        {
+            world.SetClanFoodPool(c, 0);
+        }
+        world.SetAgentTarget(0, bushX, bushY);
+        world.SetAgentState(0, AgentState.Harvesting);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+        long after = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.True(world.IsBurning(centerX, centerY) || world.FireEventCount > 0,
+            "le feu s'est éteint avant/pendant la fenêtre mesurée -- le test ne l'exerce plus");
+        Assert.Equal(AgentState.Harvesting, world.GetAgent(0).State);
         Assert.Equal(0, after - before);
     }
 }

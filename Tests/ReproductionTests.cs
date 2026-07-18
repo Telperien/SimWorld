@@ -4,17 +4,6 @@ namespace Tests;
 
 public class ReproductionTests
 {
-    private static TerrainCatalog LoadCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
-        return TerrainCatalog.Load(File.ReadAllText(path));
-    }
-
-    private static VegetationCatalog LoadVegetationCatalog()
-    {
-        string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
-        return VegetationCatalog.Load(File.ReadAllText(path));
-    }
 
     // Catalogue synthétique : mature immédiatement, gestation courte,
     // conception quasi garantie -- un test déterministe qui ne dépend
@@ -115,8 +104,8 @@ public class ReproductionTests
     [Fact]
     public void Newborn_HasCorrectStableParentIds()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
         var species = MakeFertileSpeciesCatalog();
         var config = LoadFertileConfig();
 
@@ -174,8 +163,8 @@ public class ReproductionTests
     [Fact]
     public void Immature_CannotReproduce()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
         // maturityAge == lifespanTicks : aucun agent vivant ne peut
         // jamais être mature (Age < LifespanTicks est garanti tant que
         // l'agent est vivant, cf. le check de mort de vieillesse).
@@ -200,8 +189,8 @@ public class ReproductionTests
     [Fact]
     public void Starving_CannotReproduce()
     {
-        var catalog = LoadCatalog();
-        var vegetation = LoadVegetationCatalog();
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
         var species = MakeFertileSpeciesCatalog();
         var config = LoadFertileConfig();
 
