@@ -61,6 +61,35 @@ public sealed class World
     private int _tickCounter;
     private uint _nextAgentId;
 
+    // Clans (session 18) : capacité FIXE cette session (pas de
+    // scission/fusion/suppression, donc pas de compaction réelle). La
+    // consigne "référence par Id stable, jamais par index" est quand
+    // même honorée via _clanIndexById (identité aujourd'hui, câblée
+    // pour rester correcte le jour où les scissions arrivent) --
+    // même rôle que _bushIndexAt pour la végétation.
+    private readonly Clan[] _clans;
+    private readonly int[] _clanIndexById;
+    private uint _nextClanId;
+
+    // Diagnostic par clan (comme les compteurs globaux existants) :
+    // exclus de Hash() sauf FoodPool/ClanId (déjà couverts via le
+    // bloc clan et le bloc agent).
+    private int[] _clanHungerDeaths = Array.Empty<int>();
+    private int[] _clanAgeDeaths = Array.Empty<int>();
+    // long : sur un run de plusieurs millions de ticks avec une
+    // population nombreuse, le cumul dépasse largement la capacité
+    // d'un int32 (observé : débordement vers des valeurs négatives
+    // lors du calibrage de cette session).
+    private long[] _clanFoodHarvestedCumulative = Array.Empty<long>();
+    private long[] _clanFoodConsumedCumulative = Array.Empty<long>();
+    private int[] _clanMinAliveEverObserved = Array.Empty<int>();
+
+    // Population par clan (session 18), recalculée une fois par tick
+    // réel dans RebuildAgentGrid (déjà O(AliveCount), un incrément de
+    // plus ne coûte rien) -- évite un balayage complet par agent
+    // candidat à la récolte (cf. TryStartHarvesting).
+    private int[] _clanPopulation = Array.Empty<int>();
+
     // Grille grossière d'agents (session 14) : aucune structure spatiale
     // n'existait pour les agents avant cette session (contrairement à la
     // végétation, indexée par tuile). Reconstruite à chaque tick réel,
@@ -143,6 +172,7 @@ public sealed class World
     private readonly int[] _deathDistanceHistogram = new int[DeathDistanceBucketBounds.Length + 1];
     private readonly int[] _deathTerrainHistogram = new int[256];
     private readonly int[] _deathSeekOutcomeHistogram = new int[4];
+    private int _hungerDeathsWhileHarvesting;
     private long _deathFailureStreakSum;
     private long _deathTicksIdleSum;
     private long _deathTicksMovingSum;
@@ -184,7 +214,12 @@ public sealed class World
 
     // Compteurs de diagnostic (comme les morts par cause) : n'influencent
     // jamais la simulation, donc exclus de Hash().
-    public int MealsEaten { get; private set; }
+    // long (session 19c) : depuis que manger est un effet passif appliqué
+    // à CHAQUE tick réel (au lieu d'une fois par "session de repas"),
+    // ce compteur incrémente bien plus vite qu'avant et dépasse
+    // int.MaxValue en quelques millions de ticks à haute population --
+    // même raisonnement que _clanFoodHarvestedCumulative (session 18).
+    public long MealsEaten { get; private set; }
 
     public int TilesBurnedCumulative { get; private set; }
 
@@ -212,6 +247,24 @@ public sealed class World
     // pas seulement aux points d'échantillonnage.
     public int MinAliveCountEverObserved => _minAliveCountEverObserved;
 
+    // Clans (session 18) : le tableau n'est jamais compacté cette
+    // session (pas de scission), donc itérer par index 0..ClanCount
+    // est sûr pour un appelant EXTERNE (SimReport, UI). Le code
+    // interne passe par GetClanById par principe (cf. champs privés).
+    public int ClanCount => _clans.Length;
+
+    public Clan GetClan(int index) => _clans[index];
+
+    public int GetClanHungerDeaths(int index) => _clanHungerDeaths[index];
+
+    public int GetClanAgeDeaths(int index) => _clanAgeDeaths[index];
+
+    public long GetClanFoodHarvestedCumulative(int index) => _clanFoodHarvestedCumulative[index];
+
+    public long GetClanFoodConsumedCumulative(int index) => _clanFoodConsumedCumulative[index];
+
+    public int GetClanMinAliveEverObserved(int index) => _clanMinAliveEverObserved[index];
+
     public static IReadOnlyList<double> DeathDistanceBucketUpperBounds => DeathDistanceBucketBounds;
 
     public int[] GetDeathDistanceHistogram() => (int[])_deathDistanceHistogram.Clone();
@@ -219,6 +272,13 @@ public sealed class World
     public int[] GetDeathTerrainHistogram() => (int[])_deathTerrainHistogram.Clone();
 
     public int[] GetDeathSeekOutcomeHistogram() => (int[])_deathSeekOutcomeHistogram.Clone();
+
+    // Sous-ensemble des morts de faim où l'agent était Seeking/Harvesting
+    // au moment de mourir (session 18) -- dénominateur pertinent pour
+    // juger la cécité des CUEILLEURS, distinct du total des morts de
+    // faim (qui inclut aussi les morts "pool à sec" en Idle/Moving --
+    // manger n'est plus un état depuis la session 19c).
+    public int HungerDeathsWhileHarvesting => _hungerDeathsWhileHarvesting;
 
     public double AverageDeathFailureStreak => AverageOverDeaths(_deathFailureStreakSum);
 
@@ -313,6 +373,20 @@ public sealed class World
         _cellGrassCountScratch = new int[cellCount];
         _cellTotalCountScratch = new int[cellCount];
 
+        _clans = CreateClans(config.InitialClanCount, speciesCatalog);
+        _clanIndexById = new int[_clans.Length];
+        for (int i = 0; i < _clanIndexById.Length; i++)
+        {
+            _clanIndexById[i] = i;
+        }
+        _clanHungerDeaths = new int[_clans.Length];
+        _clanAgeDeaths = new int[_clans.Length];
+        _clanFoodHarvestedCumulative = new long[_clans.Length];
+        _clanFoodConsumedCumulative = new long[_clans.Length];
+        _clanMinAliveEverObserved = new int[_clans.Length];
+        Array.Fill(_clanMinAliveEverObserved, int.MaxValue);
+        _clanPopulation = new int[_clans.Length];
+
         SpawnAgents(initialPopulation);
 
         _bushes = new Vegetation[(int)(config.BushDensity * size * size)];
@@ -326,7 +400,66 @@ public sealed class World
         _vegetationClearedTick = new int[size * size];
         Array.Fill(_vegetationClearedTick, NeverClearedSentinel);
 
+        SeedMinimumBushPerPatch();
         SeedInitialVegetation();
+    }
+
+    // Garantit qu'aucune poche d'herbe connectee ne demarre totalement
+    // sans buisson (session 19). SeedInitialVegetation seul remplit par
+    // UN SEUL balayage rotatif jusqu'a la capacite du tableau _bushes --
+    // a densite basse (post session 19), cette capacite est atteinte
+    // bien avant que le balayage n'ait visite toutes les poches, donc
+    // une poche rencontree tardivement n'obtient jamais aucun buisson.
+    // Un clan (ou, a terme, un clan place par le joueur) qui nait dans
+    // une telle poche est condamne d'office quelle que soit la densite
+    // globale -- ce n'est pas un probleme de calibrage, c'est un trou de
+    // couverture au world-gen. Flood-fill une fois a la construction
+    // (cout ponctuel O(size^2), meme statut qu'AnalyzeGrassConnectivity),
+    // plante un unique buisson mur au premier tile libre de chaque poche
+    // avant que le remplissage rotatif ne consomme la capacite restante.
+    private void SeedMinimumBushPerPatch()
+    {
+        var visited = new bool[Size * Size];
+        var queue = new List<int>();
+        int bushMatureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
+
+        for (int startIndex = 0; startIndex < Size * Size; startIndex++)
+        {
+            if (visited[startIndex] || _terrain[startIndex] != _grassId)
+            {
+                continue;
+            }
+
+            queue.Clear();
+            queue.Add(startIndex);
+            visited[startIndex] = true;
+
+            int head = 0;
+            int seedTile = -1;
+            while (head < queue.Count)
+            {
+                int index = queue[head++];
+                if (seedTile == -1 && _bushIndexAt[index] == -1 && _treeIndexAt[index] == -1)
+                {
+                    seedTile = index;
+                }
+
+                int x = index % Size;
+                int y = index / Size;
+                TryEnqueueGrass(x - 1, y, visited, queue);
+                TryEnqueueGrass(x + 1, y, visited, queue);
+                TryEnqueueGrass(x, y - 1, visited, queue);
+                TryEnqueueGrass(x, y + 1, visited, queue);
+            }
+
+            if (seedTile != -1 && BushCount < _bushes.Length)
+            {
+                int x = seedTile % Size;
+                int y = seedTile / Size;
+                SpawnBush(x, y);
+                _bushes[BushCount - 1].Stage = (byte)bushMatureStage;
+            }
+        }
     }
 
     // Un monde fraîchement généré doit démarrer avec un écosystème déjà
@@ -721,6 +854,19 @@ public sealed class World
         _agents[index].Y = y;
     }
 
+    // Seams de test (session 18) : même statut que les seams ci-dessus.
+    public void SetAgentClanId(int index, uint clanId) => _agents[index].ClanId = clanId;
+
+    public void SetClanFoodPool(int clanIndex, int amount) => _clans[clanIndex].FoodPool = amount;
+
+    public void SetAgentState(int index, AgentState state) => _agents[index].State = state;
+
+    public void SetAgentTarget(int index, int x, int y)
+    {
+        _agents[index].TargetX = x;
+        _agents[index].TargetY = y;
+    }
+
     public void Execute(ICommand command) => command.Execute(this);
 
     public void IgniteArea(int centerX, int centerY, int radius)
@@ -768,6 +914,8 @@ public sealed class World
         {
             _minAliveCountEverObserved = AliveCount;
         }
+
+        UpdateClanMinAliveObserved();
 
         _tickCounter++;
     }
@@ -829,6 +977,7 @@ public sealed class World
             Mix(ref hash, agent.Sex);
             Mix(ref hash, agent.PregnantUntil);
             Mix(ref hash, agent.PendingFatherId);
+            Mix(ref hash, agent.ClanId);
 
             List<int> path = _agentPaths[i];
             Mix(ref hash, (ulong)path.Count);
@@ -860,6 +1009,19 @@ public sealed class World
             Mix(ref hash, veg.Stage);
             Mix(ref hash, (uint)veg.FoodRemaining);
             Mix(ref hash, unchecked((uint)veg.DeathTick));
+        }
+
+        // Clans (session 18) : capacité fixe, jamais compactée cette
+        // session, itération directe par index sûre ici (code interne
+        // uniquement -- les appelants externes passent par GetClan).
+        Mix(ref hash, (ulong)_clans.Length);
+        for (int i = 0; i < _clans.Length; i++)
+        {
+            ref Clan clan = ref _clans[i];
+            Mix(ref hash, clan.Id);
+            Mix(ref hash, unchecked((uint)clan.ParentClanId));
+            Mix(ref hash, clan.Species);
+            Mix(ref hash, unchecked((uint)clan.FoodPool));
         }
 
         // Champ de gradient de nourriture (session 14c) : dérivé
@@ -1023,8 +1185,10 @@ public sealed class World
                 case AgentState.Idle: agent.TicksIdle++; break;
                 case AgentState.Moving: agent.TicksMoving++; break;
                 case AgentState.Seeking: agent.TicksSeeking++; break;
-                case AgentState.Eating: agent.TicksEating++; break;
+                case AgentState.Harvesting: agent.TicksHarvesting++; break;
             }
+            // TicksEating (session 19c) : incrémenté depuis ApplyPassiveEating
+            // sur une bouchée effective, pas ici -- manger n'est plus un état.
 
             if ((agent.Id & 3) == group)
             {
@@ -1048,11 +1212,13 @@ public sealed class World
     private void RebuildAgentGrid()
     {
         Array.Clear(_agentGridCellCounts);
+        Array.Clear(_clanPopulation);
 
         for (int i = 0; i < AliveCount; i++)
         {
             ref Agent agent = ref _agents[i];
             _agentGridCellCounts[AgentCellIndex(agent.X, agent.Y)]++;
+            _clanPopulation[ClanIndex(agent.ClanId)]++;
         }
 
         _agentGridCellStart[0] = 0;
@@ -1186,8 +1352,14 @@ public sealed class World
     {
         agent.Hunger = (byte)Math.Min(255, agent.Hunger + _config.HungerIncreasePerThink);
 
-        if (agent.Hunger >= 255)
+        // World law (session 19b) : la faim ne tue que si explicitement
+        // autorisée. Par défaut, Hunger plafonne à 255 (Math.Min ci-dessus)
+        // -- l'agent reste vivant, affamé indéfiniment tant que le pool du
+        // clan reste vide, mais continue de penser normalement (session
+        // 19c : manger n'est plus un état qui l'immobilise).
+        if (_config.AllowStarvationDeath && agent.Hunger >= 255)
         {
+            agent.StateAtDeath = (byte)agent.State;
             agent.State = AgentState.Dead;
             agent.CauseOfDeath = (byte)DeathCause.Hunger;
             return;
@@ -1200,6 +1372,7 @@ public sealed class World
         agent.Age++;
         if (agent.Age >= agent.LifespanTicks)
         {
+            agent.StateAtDeath = (byte)agent.State;
             agent.State = AgentState.Dead;
             agent.CauseOfDeath = (byte)DeathCause.Age;
             return;
@@ -1207,75 +1380,38 @@ public sealed class World
 
         // Gestation NE bloque PAS la recherche de nourriture (cf. plan,
         // matrice d'interaction) : vérifiée ici, inconditionnellement,
-        // avant le retour anticipé Seeking/Eating ci-dessous.
+        // avant le retour anticipé Seeking/Harvesting ci-dessous.
         if (agent.PregnantUntil != 0 && (uint)_tickCounter >= agent.PregnantUntil)
         {
             TryGiveBirth(ref agent);
         }
 
-        if (agent.State == AgentState.Seeking || agent.State == AgentState.Eating)
+        // Seeking/Harvesting sont des occupations réelles (déplacement,
+        // extraction) -- seuls états qui bloquent la réévaluation. Manger
+        // n'est PLUS un état (session 19c) : un agent affamé continue
+        // normalement ci-dessous, reste exclu de la reproduction (déjà
+        // gaté par Hunger < HungerSeekThreshold dans TryReproduce/
+        // TryFindMate, inchangé) MAIS reste éligible à TryStartHarvesting
+        // -- c'est ce qui élimine le deadlock Eating/Harvest (cf. plan
+        // s19c) : un agent affamé peut désormais partir cueillir.
+        if (agent.State == AgentState.Seeking || agent.State == AgentState.Harvesting)
         {
             return;
-        }
-
-        if (agent.Hunger >= _config.HungerSeekThreshold)
-        {
-            if (agent.SeekCooldown > 0)
-            {
-                agent.SeekCooldown--;
-            }
-            else
-            {
-                int currentX = (int)MathF.Floor(agent.X);
-                int currentY = (int)MathF.Floor(agent.Y);
-
-                if (TryFindNearestMatureBush(currentX, currentY, _agentPaths[index]))
-                {
-                    List<int> path = _agentPaths[index];
-                    if (path.Count == 0)
-                    {
-                        agent.State = AgentState.Eating;
-                        agent.SeekCooldown = 0;
-                        agent.SearchFailureStreak = 0;
-                        agent.HungerAtLastMealStart = agent.Hunger;
-                        agent.LastSeekOutcome = SeekOutcome.FoundBush;
-                    }
-                    else
-                    {
-                        SetWaypoint(ref agent, path[^1]);
-                        path.RemoveAt(path.Count - 1);
-                        agent.State = AgentState.Seeking;
-                        agent.SearchFailureStreak = 0;
-                        agent.LastSeekOutcome = SeekOutcome.FoundBush;
-                    }
-                    return;
-                }
-
-                agent.SeekCooldown = _config.SeekFailureCooldownThinkTicks;
-                agent.SearchFailureStreak++;
-
-                // Le BFS local a échoué : au lieu d'une errance
-                // aléatoire, l'agent lit le champ de nourriture diffusé
-                // et avance vers la cellule voisine la plus riche
-                // (session 14c, corrige la cécité au-delà du BFS).
-                // Repli sur l'errance dirigée existante si le gradient
-                // est plat localement (région jamais atteinte par la
-                // diffusion -- carte totalement vide).
-                if (TryFollowFoodGradient(ref agent))
-                {
-                    agent.LastSeekOutcome = SeekOutcome.FollowingGradient;
-                }
-                else
-                {
-                    TryStartMoving(ref agent);
-                    agent.LastSeekOutcome = SeekOutcome.BlindWander;
-                }
-            }
         }
 
         if (agent.State == AgentState.Idle)
         {
             TryReproduce(ref agent, index);
+        }
+
+        // Récolte (session 18) : déclenchée par le VIDE du pool du
+        // clan, jamais par la faim individuelle -- un agent Idle,
+        // affamé ou non, peut devenir cueilleur (session 19c : un
+        // agent affamé n'est plus immobilisé par un état "en train de
+        // manger").
+        if (agent.State == AgentState.Idle)
+        {
+            TryStartHarvesting(ref agent, index);
         }
 
         // Errance : atteinte quand l'agent n'est pas affamé, ou qu'il
@@ -1284,6 +1420,73 @@ public sealed class World
         if (agent.State == AgentState.Idle && _rngAgents.NextDouble() < _config.IdleMoveChance)
         {
             TryStartMoving(ref agent);
+        }
+    }
+
+    // Récolte (session 18) : déclenchée par le VIDE du pool du CLAN,
+    // jamais par agent.Hunger -- c'est le point de la session, la
+    // décision de cueillir est une décision de clan, pas individuelle.
+    // Chance progressive (jamais un seuil dur, même philosophie que le
+    // frein de reproduction) : proportionnelle au vide du pool rapporté
+    // à un pool cible par tête. BFS/gradient réutilisés tels quels
+    // (inchangés depuis s14c).
+    private void TryStartHarvesting(ref Agent agent, int index)
+    {
+        if (agent.SeekCooldown > 0)
+        {
+            agent.SeekCooldown--;
+            return;
+        }
+
+        ref Clan clan = ref GetClanById(agent.ClanId);
+        int clanPopulation = ClanPopulationForTarget(agent.ClanId);
+        double targetPool = _config.TargetFoodPoolPerCapita * clanPopulation;
+        double emptiness = targetPool > 0 ? 1.0 - Math.Clamp(clan.FoodPool / targetPool, 0.0, 1.0) : 1.0;
+        double harvestChance = _config.BaseHarvestChance * emptiness;
+
+        if (_rngAgents.NextDouble() >= harvestChance)
+        {
+            return;
+        }
+
+        int currentX = (int)MathF.Floor(agent.X);
+        int currentY = (int)MathF.Floor(agent.Y);
+
+        if (TryFindNearestMatureBush(currentX, currentY, _agentPaths[index]))
+        {
+            List<int> path = _agentPaths[index];
+            if (path.Count == 0)
+            {
+                agent.State = AgentState.Harvesting;
+                agent.SeekCooldown = 0;
+                agent.SearchFailureStreak = 0;
+                agent.LastSeekOutcome = SeekOutcome.FoundBush;
+            }
+            else
+            {
+                SetWaypoint(ref agent, path[^1]);
+                path.RemoveAt(path.Count - 1);
+                agent.State = AgentState.Seeking;
+                agent.SearchFailureStreak = 0;
+                agent.LastSeekOutcome = SeekOutcome.FoundBush;
+            }
+            return;
+        }
+
+        agent.SeekCooldown = _config.SeekFailureCooldownThinkTicks;
+        agent.SearchFailureStreak++;
+
+        // Le BFS local a échoué : même repli sur le gradient de
+        // nourriture qu'avant (s14c), inchangé -- seul le contexte
+        // d'appel (récolte pour le clan, pas repas individuel) diffère.
+        if (TryFollowFoodGradient(ref agent))
+        {
+            agent.LastSeekOutcome = SeekOutcome.FollowingGradient;
+        }
+        else
+        {
+            TryStartMoving(ref agent);
+            agent.LastSeekOutcome = SeekOutcome.BlindWander;
         }
     }
 
@@ -1316,7 +1519,21 @@ public sealed class World
         int foodInCell = _foodPerCell[cell];
         double localFoodPerCapita = foodInCell / (double)(agentsInCell + 1);
         double ratio = Math.Clamp(localFoodPerCapita / _config.TargetFoodPerCapita, 0.0, 1.0);
-        double conceptionChance = _config.BaseConceptionChance * ratio;
+
+        // Frein additionnel sur la santé du POOL du clan (session 18,
+        // découvert empiriquement) : le frein local (densité de
+        // buissons) ne réagit jamais au stress du clan -- une
+        // grossesse en cours ne coûte rien tant qu'on ne regarde QUE la
+        // végétation locale, alors que la faim (retardée par le pool)
+        // continue à monter. Sans ce second facteur, les naissances
+        // dépassent largement ce que la récolte peut soutenir avant que
+        // la faim ne freine quoi que ce soit (rétroaction retardée,
+        // dépassement puis effondrement plutôt qu'un plateau).
+        ref Clan clan = ref GetClanById(agent.ClanId);
+        int clanPopulation = ClanPopulationForTarget(agent.ClanId);
+        double clanPoolRatio = Math.Clamp(clan.FoodPool / (_config.TargetFoodPoolPerCapita * clanPopulation), 0.0, 1.0);
+
+        double conceptionChance = _config.BaseConceptionChance * ratio * clanPoolRatio;
 
         if (_rngAgents.NextDouble() >= conceptionChance)
         {
@@ -1367,6 +1584,12 @@ public sealed class World
 
                     ref Agent candidate = ref _agents[candidateIndex];
                     if (candidate.Sex != 1 || candidate.State != AgentState.Idle)
+                    {
+                        continue;
+                    }
+
+                    // Pas de reproduction inter-clans (session 18).
+                    if (candidate.ClanId != female.ClanId)
                     {
                         continue;
                     }
@@ -1437,6 +1660,9 @@ public sealed class World
             Tracked = false,
             State = AgentState.Idle,
             Species = mother.Species,
+            // Hérité de la mère (session 18) : un enfant naît dans le
+            // clan de ses parents, jamais sans clan.
+            ClanId = mother.ClanId,
             Hunger = 0,
             Facing = 0,
             SeekCooldown = 0,
@@ -1505,7 +1731,15 @@ public sealed class World
 
     private void MoveAgent(ref Agent agent, int index, float step)
     {
-        if (agent.State == AgentState.Eating)
+        // Manger n'est plus un état exclusif (session 19c) : effet passif
+        // appliqué à CHAQUE tick réel, à TOUT agent affamé, quel que soit
+        // son état (y compris Harvesting -- un cueilleur affamé mange sans
+        // jamais quitter sa récolte). C'est ce qui rend le deadlock
+        // Eating/Harvest structurellement impossible : plus aucun état ne
+        // peut "avaler" toute la population sans issue.
+        ApplyPassiveEating(ref agent);
+
+        if (agent.State == AgentState.Harvesting)
         {
             HarvestTick(ref agent);
             return;
@@ -1551,9 +1785,7 @@ public sealed class World
             bush.Type == _bushTypeId &&
             bush.Stage >= _vegetationCatalog.Get(_bushTypeId).MatureStage)
         {
-            agent.State = AgentState.Eating;
-            agent.HungerAtLastMealStart = agent.Hunger;
-            MealsEaten++;
+            agent.State = AgentState.Harvesting;
         }
         else
         {
@@ -1561,10 +1793,13 @@ public sealed class World
         }
     }
 
-    // Récolte étalée sur plusieurs ticks : chaque tick retire la même
-    // quantité au stock du buisson ET à la faim de l'agent (récolter et
-    // se nourrir sont le même geste). Générique par conception (servira
-    // plus tard au bois/à la pierre, pas codé cette session).
+    // Récolte étalée sur plusieurs ticks (session 18) : chaque tick
+    // retire au stock du buisson et dépose DIRECTEMENT dans le pool du
+    // CLAN -- jamais dans la faim du cueilleur (récolter et manger sont
+    // deux actions distinctes désormais). Aucune cargaison en transit :
+    // ce qui est extrait est déjà dans le pool au tick où c'est extrait
+    // (cf. plan, CLAUDE.md section Ressources). Générique par
+    // conception (servira plus tard au bois/à la pierre).
     private void HarvestTick(ref Agent agent)
     {
         int index = agent.TargetY * Size + agent.TargetX;
@@ -1573,14 +1808,17 @@ public sealed class World
         if (slot == -1)
         {
             // Le buisson a disparu (vidé ou brûlé) pendant que l'agent
-            // mangeait déjà (concurrence sans réservation, hors scope).
+            // récoltait déjà (concurrence sans réservation, hors scope).
             agent.State = AgentState.Idle;
             return;
         }
 
         int harvested = Math.Min(_config.HarvestAmountPerTick, _bushes[slot].FoodRemaining);
         _bushes[slot].FoodRemaining -= harvested;
-        agent.Hunger = (byte)Math.Max(0, agent.Hunger - harvested);
+
+        ref Clan clan = ref GetClanById(agent.ClanId);
+        clan.FoodPool += harvested;
+        _clanFoodHarvestedCumulative[ClanIndex(agent.ClanId)] += harvested;
 
         if (_bushes[slot].FoodRemaining <= 0)
         {
@@ -1589,9 +1827,46 @@ public sealed class World
             return;
         }
 
-        if (agent.Hunger == 0)
+        // S'arrête quand le pool cible du clan est atteint -- un
+        // cueilleur ne vide pas systématiquement tout le buisson si le
+        // clan n'a plus besoin de plus, laissant le reste pour plus
+        // tard/un autre cueilleur (le buisson n'est pas réservé, cf.
+        // matrice d'interaction).
+        int clanPopulation = ClanPopulationForTarget(agent.ClanId);
+        if (clan.FoodPool >= _config.TargetFoodPoolPerCapita * clanPopulation)
         {
             agent.State = AgentState.Idle;
+        }
+    }
+
+    // Manger depuis le pool du clan (session 18, refondu en effet passif
+    // session 19c) : AUCUN déplacement, où que soit l'agent, quel que
+    // soit son état -- appelé inconditionnellement depuis MoveAgent
+    // chaque tick réel, pour tout agent vivant. Si le pool est vide,
+    // l'agent ne mange pas ce tick (continue d'avoir faim, retentera au
+    // suivant) -- SANS jamais bloquer son état : contrairement à
+    // l'ancien EatFromPoolTick, il n'y a plus de transition vers/depuis
+    // un état "en train de manger" (supprimé, cf. plan s19c), donc plus
+    // aucun moyen pour toute une population affamée de se retrouver
+    // collectivement incapable de repartir cueillir.
+    private void ApplyPassiveEating(ref Agent agent)
+    {
+        if (agent.Hunger == 0)
+        {
+            return;
+        }
+
+        ref Clan clan = ref GetClanById(agent.ClanId);
+        int amount = Math.Min(_config.HungerDecreasePerEatTick, Math.Min((int)agent.Hunger, clan.FoodPool));
+
+        if (amount > 0)
+        {
+            agent.HungerAtLastMealStart = agent.Hunger;
+            clan.FoodPool -= amount;
+            agent.Hunger = (byte)Math.Max(0, agent.Hunger - amount);
+            _clanFoodConsumedCumulative[ClanIndex(agent.ClanId)] += amount;
+            agent.TicksEating++;
+            MealsEaten++;
         }
     }
 
@@ -1841,7 +2116,18 @@ public sealed class World
 
         byte terrainId = _terrain[tileY * Size + tileX];
         _deathTerrainHistogram[terrainId]++;
-        _deathSeekOutcomeHistogram[agent.LastSeekOutcome]++;
+
+        // LastSeekOutcome ne veut dire quelque chose que pour un agent
+        // qui CHERCHAIT/RÉCOLTAIT au moment de sa mort (session 18) --
+        // un agent mort simplement affamé en Idle/Moving (pool à sec,
+        // session 19c : manger n'est plus un état) n'a rien cherché ce
+        // tick-là, LastSeekOutcome y serait une valeur périmée d'un
+        // voyage de récolte passé, pas un signe de cécité actuelle.
+        if (agent.StateAtDeath == (byte)AgentState.Seeking || agent.StateAtDeath == (byte)AgentState.Harvesting)
+        {
+            _hungerDeathsWhileHarvesting++;
+            _deathSeekOutcomeHistogram[agent.LastSeekOutcome]++;
+        }
 
         _deathFailureStreakSum += agent.SearchFailureStreak;
         _deathTicksIdleSum += agent.TicksIdle;
@@ -1872,9 +2158,16 @@ public sealed class World
             if (_agents[i].State == AgentState.Dead)
             {
                 _deathsByCause[_agents[i].CauseOfDeath]++;
+
+                int clanIndex = ClanIndex(_agents[i].ClanId);
                 if (_agents[i].CauseOfDeath == (byte)DeathCause.Hunger)
                 {
+                    _clanHungerDeaths[clanIndex]++;
                     RecordDeathDiagnostics(ref _agents[i]);
+                }
+                else if (_agents[i].CauseOfDeath == (byte)DeathCause.Age)
+                {
+                    _clanAgeDeaths[clanIndex]++;
                 }
 
                 aliveCount--;
@@ -1893,68 +2186,202 @@ public sealed class World
         AliveCount = aliveCount;
     }
 
+    // Minimum de population JAMAIS observé, PAR CLAN (session 18) --
+    // même raisonnement que _minAliveCountEverObserved (un
+    // échantillonnage périodique peut rater un creux court, cf. s14c).
+    // stackalloc : ClanCount est petit et fixe cette session, aucune
+    // allocation tas dans le tick.
+    private void UpdateClanMinAliveObserved()
+    {
+        Span<int> counts = stackalloc int[_clans.Length];
+        for (int i = 0; i < AliveCount; i++)
+        {
+            counts[ClanIndex(_agents[i].ClanId)]++;
+        }
+
+        for (int c = 0; c < _clans.Length; c++)
+        {
+            if (counts[c] < _clanMinAliveEverObserved[c])
+            {
+                _clanMinAliveEverObserved[c] = counts[c];
+            }
+        }
+    }
+
+    // Un clan par race disponible, cyclé (une seule race aujourd'hui,
+    // donc tous les clans démarrent avec la même -- reste conforme à
+    // "un clan = une race", qui n'exige pas l'inverse).
+    private Clan[] CreateClans(int count, SpeciesCatalog speciesCatalog)
+    {
+        var clans = new Clan[Math.Max(1, count)];
+        int speciesCount = Math.Max(1, speciesCatalog.Count);
+        for (int i = 0; i < clans.Length; i++)
+        {
+            clans[i] = new Clan
+            {
+                Id = _nextClanId++,
+                ParentClanId = -1,
+                Species = (byte)(i % speciesCount),
+                FoodPool = 0,
+            };
+        }
+
+        return clans;
+    }
+
+    private int ClanIndex(uint id) => _clanIndexById[id];
+
+    private ref Clan GetClanById(uint id) => ref _clans[ClanIndex(id)];
+
+    // Population utilisée pour calculer le pool CIBLE du clan (récolte,
+    // frein de reproduction) -- plafonnée à ReferenceClanPopulation
+    // (cf. commentaire sur le champ de config) pour qu'un clan qui
+    // dépasse cette taille ressente une vraie pression de rareté au
+    // lieu de voir son objectif grandir indéfiniment avec lui.
+    private int ClanPopulationForTarget(uint clanId)
+    {
+        int actual = Math.Max(1, _clanPopulation[ClanIndex(clanId)]);
+        return Math.Min(actual, _config.ReferenceClanPopulation);
+    }
+
+    // Spawn groupé par clan (session 18) : disperser uniformément sur
+    // toute la carte comme avant diviserait la densité de partenaires
+    // DU MÊME CLAN par InitialClanCount (les autres agents proches sont
+    // désormais hors-clan et filtrés par TryFindMate) -- effet Allee
+    // quasi garanti. Chaque clan est concentré sur un disque de rayon
+    // Size*ClanSpawnRadiusFraction autour d'un centre tiré au hasard,
+    // pour restaurer une densité locale par clan comparable au cas déjà
+    // validé (199 agents dispersés sur toute la carte, s15) -- calcul
+    // détaillé dans le plan de session.
     private void SpawnAgents(int count)
     {
+        int clanCount = _clans.Length;
+        int perClan = count / clanCount;
+        int remainder = count - perClan * clanCount;
+        double radius = Size * _config.ClanSpawnRadiusFraction;
+
         int spawned = 0;
-        int attempts = 0;
-        int maxAttempts = count * MaxSpawnAttemptsPerAgent;
 
-        while (spawned < count && attempts < maxAttempts)
+        for (int c = 0; c < clanCount && spawned < _agents.Length; c++)
         {
-            attempts++;
-
-            int x = (int)(_rngWorldGen.NextDouble() * Size);
-            int y = (int)(_rngWorldGen.NextDouble() * Size);
-
-            if (!_catalog.Get(_terrain[y * Size + x]).Walkable)
+            int clanTarget = perClan + (c < remainder ? 1 : 0);
+            if (clanTarget == 0 || !TryPickClusterCenter(out int centerX, out int centerY))
             {
                 continue;
             }
 
-            SpeciesType species = _speciesCatalog.Get(0);
-            uint lifespan = RollLifespan(species);
+            SpeciesType species = _speciesCatalog.Get(_clans[c].Species);
+            int clanSpawned = 0;
+            int attempts = 0;
+            int maxAttempts = clanTarget * MaxSpawnAttemptsPerAgent;
 
-            _agents[spawned] = new Agent
+            while (clanSpawned < clanTarget && attempts < maxAttempts && spawned < _agents.Length)
             {
-                Id = _nextAgentId++,
-                X = x + 0.5f,
-                Y = y + 0.5f,
-                TargetX = x,
-                TargetY = y,
-                MotherId = Agent.UnknownParent,
-                FatherId = Agent.UnknownParent,
-                Tracked = false,
-                State = AgentState.Idle,
-                Species = 0,
-                Hunger = 0,
-                Facing = 0,
-                SeekCooldown = 0,
-                WanderDirection = 0,
-                WanderTicksRemaining = 0,
-                // Âge de départ étalé sur toute l'espérance de vie de CET
-                // agent (pas 0 pour tout le monde) : sans ça, les 199
-                // agents initiaux meurent tous ensemble, et leurs enfants
-                // aussi -- exactement le piège de vague de cohorte des
-                // arbres (s11), transposé aux agents.
-                Age = (uint)(_rngAgents.NextDouble() * lifespan),
-                LifespanTicks = lifespan,
-                Sex = (byte)(_rngAgents.NextDouble() < 0.5 ? 0 : 1),
-                PregnantUntil = 0,
-                PendingFatherId = Agent.UnknownParent,
-                CauseOfDeath = 0,
-                SearchFailureStreak = 0,
-                TicksIdle = 0,
-                TicksMoving = 0,
-                TicksSeeking = 0,
-                TicksEating = 0,
-                HungerAtLastMealStart = 0,
-            LastSeekOutcome = SeekOutcome.NeverSearched,
-            };
-            spawned++;
+                attempts++;
+
+                double dx = (_rngWorldGen.NextDouble() * 2.0 - 1.0) * radius;
+                double dy = (_rngWorldGen.NextDouble() * 2.0 - 1.0) * radius;
+                if (dx * dx + dy * dy > radius * radius)
+                {
+                    continue;
+                }
+
+                int x = centerX + (int)dx;
+                int y = centerY + (int)dy;
+                if (x < 0 || x >= Size || y < 0 || y >= Size || !_catalog.Get(_terrain[y * Size + x]).Walkable)
+                {
+                    continue;
+                }
+
+                uint lifespan = RollLifespan(species);
+
+                _agents[spawned] = new Agent
+                {
+                    Id = _nextAgentId++,
+                    X = x + 0.5f,
+                    Y = y + 0.5f,
+                    TargetX = x,
+                    TargetY = y,
+                    MotherId = Agent.UnknownParent,
+                    FatherId = Agent.UnknownParent,
+                    Tracked = false,
+                    State = AgentState.Idle,
+                    Species = _clans[c].Species,
+                    ClanId = _clans[c].Id,
+                    // Étalée sur [0, HungerSeekThreshold) -- même
+                    // raisonnement que l'âge de départ étalé ci-dessous
+                    // (s11/s14) : Hunger=0 pour tout le monde ferait
+                    // franchir le seuil de repas EN MÊME TEMPS à toute
+                    // la population initiale, vidant le pool du clan en
+                    // une seule rafale synchronisée au lieu d'un flux
+                    // lissé dans le temps (découvert en s18 : sans ça,
+                    // toute la population initiale meurt vers le tick
+                    // 1500, le pool encaisse la rafale puis reste à sec).
+                    Hunger = (byte)(_rngAgents.NextDouble() * _config.HungerSeekThreshold),
+                    Facing = 0,
+                    SeekCooldown = 0,
+                    WanderDirection = 0,
+                    WanderTicksRemaining = 0,
+                    // Âge de départ étalé sur toute l'espérance de vie de CET
+                    // agent (pas 0 pour tout le monde) : sans ça, les agents
+                    // initiaux meurent tous ensemble, et leurs enfants aussi
+                    // -- exactement le piège de vague de cohorte des arbres
+                    // (s11), transposé aux agents.
+                    Age = (uint)(_rngAgents.NextDouble() * lifespan),
+                    LifespanTicks = lifespan,
+                    Sex = (byte)(_rngAgents.NextDouble() < 0.5 ? 0 : 1),
+                    PregnantUntil = 0,
+                    PendingFatherId = Agent.UnknownParent,
+                    CauseOfDeath = 0,
+                    SearchFailureStreak = 0,
+                    TicksIdle = 0,
+                    TicksMoving = 0,
+                    TicksSeeking = 0,
+                    TicksEating = 0,
+                    HungerAtLastMealStart = 0,
+                    LastSeekOutcome = SeekOutcome.NeverSearched,
+                };
+                spawned++;
+                clanSpawned++;
+            }
+
+            // Un clan neuf démarre avec un pool ÉTABLI, pas vide (même
+            // esprit que SeedInitialVegetation, s15) : tous les agents
+            // spawnent avec Hunger=0 simultanément, donc ils franchiront
+            // le seuil de faim au même moment -- sans réserve de départ,
+            // toute la population initiale meurt avant qu'un premier
+            // cueilleur n'ait eu le temps de faire l'aller-retour
+            // (~165 ticks, cf. plan). Démarre exactement au niveau cible
+            // par tête pour cette population.
+            _clans[c].FoodPool = (int)(_config.TargetFoodPoolPerCapita * clanSpawned);
         }
 
         AliveCount = spawned;
         AgentSpawnCapped = spawned < count;
+    }
+
+    // Garde-fou technique (pas un réglage de gameplay), même esprit que
+    // MaxSpawnAttemptsPerAgent : borne le rejection sampling du centre
+    // de grappe sur une carte quasi dégénérée.
+    private const int MaxClusterCenterAttempts = 100;
+
+    private bool TryPickClusterCenter(out int x, out int y)
+    {
+        for (int attempt = 0; attempt < MaxClusterCenterAttempts; attempt++)
+        {
+            int candidateX = (int)(_rngWorldGen.NextDouble() * Size);
+            int candidateY = (int)(_rngWorldGen.NextDouble() * Size);
+            if (_catalog.Get(_terrain[candidateY * Size + candidateX]).Walkable)
+            {
+                x = candidateX;
+                y = candidateY;
+                return true;
+            }
+        }
+
+        x = 0;
+        y = 0;
+        return false;
     }
 
     private uint RollLifespan(SpeciesType species)

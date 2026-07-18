@@ -1,7 +1,7 @@
 {
   "fireSpreadChance": 0.5,
   "agentDensity": 0.00076,
-  "bushDensity": 0.2,
+  "bushDensity": 0.04,
   "treeDensity": 0.02,
   "vegetationTickInterval": 30,
   "idleMoveChance": 0.1,
@@ -25,9 +25,15 @@
   "wanderPersistenceTicks": 6,
   "wanderTurnChance": 0.15,
   "mateSearchRadius": 8,
-  "agentCapacityMultiplier": 80,
-  "baseConceptionChance": 0.02,
+  "agentCapacityMultiplier": 50,
+  "baseConceptionChance": 0.003,
   "targetFoodPerCapita": 5.0,
   "foodGradientDiffusionRate": 0.2,
-  "foodGradientDiffusionIterations": 12
+  "foodGradientDiffusionIterations": 12,
+  "initialClanCount": 3,
+  "clanSpawnRadiusFraction": 0.33,
+  "baseHarvestChance": 0.04,
+  "targetFoodPoolPerCapita": 900.0,
+  "referenceClanPopulation": 3000,
+  "allowStarvationDeath": false
 }

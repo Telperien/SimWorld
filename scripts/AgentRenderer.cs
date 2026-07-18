@@ -15,7 +15,7 @@ public partial class AgentRenderer : MultiMeshInstance2D
 
     private static readonly Color IdleColor = new(0.9f, 0.15f, 0.15f);
     private static readonly Color SeekingColor = new(0.95f, 0.6f, 0.1f);
-    private static readonly Color EatingColor = new(0.2f, 0.8f, 0.3f);
+    private static readonly Color HarvestingColor = new(0.3f, 0.5f, 0.95f);
 
     private World _world = null!;
 
@@ -50,10 +50,13 @@ public partial class AgentRenderer : MultiMeshInstance2D
         }
     }
 
+    // Manger n'est plus un etat depuis la session 19c (effet passif) --
+    // aucune couleur dediee, un agent affame en Idle/Moving/Harvesting
+    // garde la couleur de son etat reel.
     private static Color ColorForState(AgentState state) => state switch
     {
         AgentState.Seeking => SeekingColor,
-        AgentState.Eating => EatingColor,
+        AgentState.Harvesting => HarvestingColor,
         _ => IdleColor,
     };
 

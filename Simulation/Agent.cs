@@ -4,8 +4,26 @@ public enum AgentState : byte
 {
     Idle = 0,
     Moving = 1,
+
+    // Marche vers une cible via BFS/gradient (inchangé, s14c) --
+    // emprunté EXCLUSIVEMENT par les cueilleurs depuis la session 18
+    // (manger ne déplace plus jamais un agent, cf. Eating ci-dessous).
     Seeking = 2,
-    Eating = 3,
+
+    // Récolte (session 18) : arrivé au buisson, en train d'en extraire
+    // la nourriture tick par tick DANS LE POOL DU CLAN (jamais dans
+    // Hunger directement -- récolter et manger sont deux actions
+    // distinctes).
+    Harvesting = 5,
+
+    // Pas de valeur 3 : manger n'est PLUS un état FSM (session 19c,
+    // suppression du deadlock Eating/Harvest). C'était un besoin
+    // modélisé comme une occupation exclusive, alors que c'est un effet
+    // passif sans condition spatiale -- voir ApplyPassiveEating dans
+    // World.cs, appelé chaque tick réel pour tout agent affamé, quel que
+    // soit son état. CLAUDE.md, section IA : un besoin n'est jamais un
+    // état FSM exclusif.
+
     Dead = 4,
 }
 
@@ -67,6 +85,13 @@ public struct Agent
     // avant qu'un Hash() puisse la voir) -> exclue de Hash().
     public byte CauseOfDeath;
 
+    // État FSM juste AVANT la mort (session 18) -- capturé avant que
+    // ThinkAgent n'écrase State en Dead, pour distinguer "mourait en
+    // route/en récolte" (Seeking/Harvesting) de "mourait le pool à sec"
+    // (Eating, sans déplacement). Même statut que CauseOfDeath : ne
+    // persiste jamais au-delà du tick où c'est écrit, exclu de Hash().
+    public byte StateAtDeath;
+
     // --- Diagnostic (session 12) ---
     // Écrits uniquement, jamais lus par une décision : n'influencent
     // jamais le comportement, donc exclus de World.Hash().
@@ -83,6 +108,18 @@ public struct Agent
     // aveugle. Distingue "en route vers une source connue" (légitime)
     // de "aucun signal, marche au hasard" (le vrai signe d'aveuglement).
     public byte LastSeekOutcome;
+
+    // Clan (session 18) : JAMAIS de valeur "pas de clan", contrairement
+    // à MotherId/FatherId (Agent.UnknownParent). Hérité de la mère à la
+    // naissance. Influence le comportement (cueillette, reproduction
+    // inter-clan interdite) -> inclus dans Hash().
+    public uint ClanId;
+
+    // Diagnostic (session 18) : temps passé en Harvesting (récolte),
+    // distinct de TicksEating (repas depuis le pool, sans déplacement)
+    // -- écrits uniquement, jamais lus par une décision, exclus de
+    // Hash() comme le reste des compteurs de la section diagnostic.
+    public uint TicksHarvesting;
 }
 
 public static class SeekOutcome

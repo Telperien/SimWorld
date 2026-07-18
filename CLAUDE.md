@@ -96,6 +96,11 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
 - La struct Agent porte MotherId, FatherId et Tracked dès sa première version.
 - Généalogie conservée à vie uniquement pour les castes tracked ;
   les anonymes partent dans un ring buffer borné.
+- La faim ne tue pas par défaut (`AllowStarvationDeath=false`) : un
+  pool vide bloque la reproduction, jamais un seuil de faim qui tue.
+  Seule la vieillesse régule la population par défaut. Le flag existe
+  pour un usage futur explicite (pouvoir divin, race spécifique) --
+  ne jamais l'activer silencieusement pour "corriger" un calibrage.
 
 ## Ressources — pool commun, zéro logistique
 - Aucun inventaire individuel, aucun transport, aucun rôle "porteur".
@@ -108,11 +113,17 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   jamais de caravane, jamais de route commerciale (cohérent avec la
   règle "pas de commerce" déjà posée).
 - S'applique dès l'implémentation des matériaux (bois/pierre) et,
-  plus tard, à la nourriture une fois que les civs existent et que la
-  capacité de charge est calculée au niveau civ plutôt qu'individuel.
-- Avant l'existence des civs : le comportement actuel (un agent
-  mange directement un buisson, Hunger individuel) reste inchangé —
-  il n'y a pas encore de pool à qui appartenir.
+  depuis la session 18, à la nourriture : un cueilleur récolte dans le
+  pool du CLAN (cf. section Clans ci-dessous), plus dans le Hunger
+  individuel directement.
+
+## Clans
+Civilisation = race = species.json, aucun état runtime. Le CLAN est
+l'unité politique : ressources, reproduction, diplomatie, guerre,
+territoire. Un clan = une race. Un agent a toujours un clan. Récolter
+(buisson -> pool du clan) et manger (pool -> Hunger, sans déplacement)
+sont deux actions distinctes. Pas de reproduction inter-clans.
+ParentClanId posé dès la création, même sans scissions.
 
 ## Récolte — réservation de cible
 - Un agent qui cible un buisson/gisement pour récolte le RÉSERVE :
@@ -139,6 +150,16 @@ Pixel art entièrement généré en code. Projet perso solo, dev 100 % agentique
   agents s'agglutinent : ils carvent des déserts plus larges que leur
   perception. Toute pénurie locale doit être échappable par un
   gradient, jamais par une marche aléatoire (déplacement en √N).
+- Un besoin (faim, etc.) n'est jamais un état FSM exclusif. Les états
+  FSM sont réservés aux actions qui occupent PHYSIQUEMENT l'agent
+  (déplacement, récolte, plus tard combat/construction). Manger, se
+  soigner, etc. sont des effets passifs appliqués en continu quel que
+  soit l'état. Un état FSM qui ne peut se terminer que si une
+  ressource externe redevient disponible est un verrou en puissance
+  dès que la population peut collectivement l'atteindre (deadlock
+  Eating/Harvest, session 19c : toute la population bloquée en
+  "Eating" en même temps, pool à sec, plus personne ne pouvait jamais
+  redevenir cueilleur).
 
 ## Lisibilité
 - Toute valeur affichée = Breakdown(final, Modifier[]). Jamais un float nu.

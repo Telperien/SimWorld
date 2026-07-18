@@ -704,3 +704,137 @@ la prochaine fois.
   ~6× plus rapide que la repousse buisson).
 - Lancement manuel du jeu (F5) pour confirmer visuellement
   l'amélioration de lisibilité (sprites) et la ligne verticale.
+
+## Sessions 18/19/19b/19c — Clans, calibrage post-pool, deadlock Eating/Harvest
+
+### Session 18 — Clans, le split récolte/manger
+Le CLAN devient l'unité politique (ressources, reproduction) : `Clan.FoodPool`
+partagé, `Agent.ClanId` hérité de la mère. Récolter (buisson → pool du
+clan) et manger (pool → Hunger, sans déplacement) deviennent deux
+actions distinctes — avant, un seul état `Eating` confondait les deux.
+Spawn groupé par clan (grappe géographique) pour éviter un effet Allee
+sur la recherche de partenaire inter-clan. Reproduction inter-clans
+interdite. Golden-hash cassé (ClanId + bloc Clan dans `Hash()`), jamais
+recalculé cette session (suite calibrage non aboutie).
+
+### Session 19 (perf-diagnostic puis calibrage densité)
+Diagnostic de perf : le run 2M ticks passé de 6s à 30min n'était PAS
+une régression algorithmique (mesuré linéaire par agent via un nouveau
+mode `SimReport --bench`) — c'était la population qui saturait le
+tableau `Agent[]` (`AgentCapacityMultiplier` trop bas). `bushDensity`
+descendue de 0.2 vers ~0.01-0.04 (10-25× l'ancienne production, jamais
+recalibrée depuis avant le pool de clan). Bug de spawn trouvé et
+corrigé : `SeedMinimumBushPerPatch` (nouvelle méthode, `World.cs`)
+garantit un buisson mûr par poche d'herbe connectée dès la
+construction — avant ce fix, une poche visitée tardivement par le
+remplissage rotatif n'obtenait jamais aucun buisson, condamnant
+d'office tout clan qui y naissait, indépendamment de la densité
+globale.
+
+### Session 19b — World law "pas de mort de faim"
+Nouveau flag `SimulationConfig.AllowStarvationDeath` (défaut `false`) :
+la faim ne tue plus par défaut, elle bloque seulement la reproduction
+(déjà gaté par `Hunger < HungerSeekThreshold`). Décision actée : le
+pool de clan PARTAGÉ transformait la famine en falaise synchronisée
+(tout le clan meurt d'un coup) — sans mort de faim, plus de falaise,
+seule la vieillesse régule la population.
+
+**Découverte critique** : en retirant la mort de faim, un DEADLOCK
+préexistant (introduit en session 18, jamais visible avant car masqué
+par la mort de faim) est apparu au grand jour. Un agent en état
+`Eating` n'était plus jamais réévalué par `ThinkAgent` et ne pouvait
+en sortir que si `Hunger` retombait à 0 — impossible si le pool du
+clan restait vide. Si toute la population d'un clan franchissait le
+seuil de faim en même temps (quasi certain pendant une croissance),
+plus personne n'était éligible à `TryStartHarvesting` : le pool ne
+remontait plus jamais. Preuve empirique : run 2,5M ticks seed 42,
+naissances tombées à 0 dès le tick 750 000 (2066 agents vivants),
+extinction totale par vieillesse pure aux alentours du tick 2M, sans
+aucune récupération sur les 500k ticks restants.
+
+### Session 19c — Le vrai fix : manger devient un effet passif
+Cause racine actée : "manger" avait été modélisé comme un ÉTAT FSM
+EXCLUSIF (comme se déplacer ou récolter), alors que c'est un effet
+PASSIF sans condition spatiale. Un état FSM qui ne peut se terminer
+que si une ressource externe redevient disponible est un verrou en
+puissance dès que la population peut collectivement l'atteindre.
+
+**Fix** : `AgentState.Eating` SUPPRIMÉ de l'enum. Nouvelle méthode
+`ApplyPassiveEating` (renommée depuis `EatFromPoolTick`), appelée
+INCONDITIONNELLEMENT à chaque tick réel pour TOUT agent vivant, quel
+que soit son état — y compris `Harvesting` (un cueilleur affamé mange
+désormais sans jamais quitter sa récolte). `ThinkAgent` ne bloque plus
+la réévaluation que pour `Seeking`/`Harvesting` (occupations réelles).
+Un agent affamé Idle reste donc éligible à `TryStartHarvesting` — le
+deadlock devient structurellement impossible. Nouveaux tests directs :
+`No_Eating_State_Exists`, `Agent_EatsPassively_WhileHarvesting`,
+`No_Starvation_Deadlock` (scénario exact du deadlock reproduit,
+prouve qu'un agent finit toujours par redevenir cueilleur et que le
+pool remonte).
+
+En creusant la suite de tests pour valider tout ça, découverte que
+**la suite complète n'avait jamais été vérifiée verte depuis la
+session 18** (le fameux "S19: build/tests verts" restait en tâche
+pending) : 6 tests cassés trouvés et corrigés, aucun lié au deadlock
+lui-même —
+- `Population_Extinguishes_OnFoodlessMap`, `Agents_DieOfHunger_InScarcityScenario`,
+  `Agent_Dies_WithoutFood_AfterThreshold`, `Agent_Id_RemainsValid_AfterMultipleDeathsAndCompactions` :
+  s'appuyaient sur la mort de faim par défaut (désormais `false`) —
+  `AllowStarvationDeath=true` explicite ajouté, ou mort par âge
+  substituée à la mort par faim pour les tests de compaction.
+- `Newborn_HasCorrectStableParentIds`, `Starving_CannotReproduce`,
+  `Newborn_InheritsMotherClan` : le helper `MakeFertileCouple` zérotait
+  le pool de TOUS les clans (y compris celui du couple testé) pour
+  "neutraliser" la population ambiante — bloquait donc AUSSI la
+  reproduction du couple lui-même via `clanPoolRatio`. Fix : isoler le
+  couple dans un clan qui n'appartient qu'à eux (réassignation de la
+  population ambiante vers un autre clan via `SetAgentClanId`), puis
+  financer UNIQUEMENT ce clan isolé.
+- `Bushes_RecolonizeDepletedZone_Locally` : ne clearait pas la
+  végétation à la construction — `SeedMinimumBushPerPatch` (session
+  19) y laissait des buissons résiduels qui faussaient la mesure.
+- Un vrai bug trouvé au passage : `MealsEaten` (int) débordait
+  (`Repas cumules: -1419745631` observé) car il incrémente désormais à
+  CHAQUE bouchée effective (tick réel), plus une fois par "session de
+  repas" — passé en `long`, même raisonnement que
+  `_clanFoodHarvestedCumulative` (session 18).
+
+Golden-hash recalculé : `16475275109242875677` → `5609630853180351789`.
+
+### Balayage de densité post-fix (bushDensity ∈ {0.01, 0.015, 0.02, 0.03}, seeds 42/7, 2M ticks, AgentCapacityMultiplier=250)
+
+| densité | slots | pop finale seed42 | pop finale seed7 | clusterisation (42/7) |
+|---|---|---|---|---|
+| 0.01 | 2621 | 43 (déclin) | 685 (croissance) | 198 / 81 |
+| 0.015 | 3932 | 1 (quasi-éteint) | 12291 (1 clan, encore en accélération) | 244 / 16 |
+| 0.02 | 5242 | 168 (déclin) | 18832 (1 clan, encore en croissance) | 162 / 14 |
+| 0.03 | 7864 | **16049, LES 3 CLANS VIVANTS** | 27956 (1 clan domine) | 12 / 9 |
+
+**Sur les 8 runs (4 densités × 2 seeds) : `Faim=0` et `naissances refusées=0` partout, sans exception** —
+les deux invariants de cette session tiennent structurellement, quelle
+que soit la densité. Le deadlock est bien éliminé.
+
+**Non résolu** : la variance seed-à-seed reste massive (un clan
+écrase souvent les deux autres, ou toute la population décline vers
+quasi-zéro) et aucune densité testée ne s'approche de la cible
+CLAUDE.md (1500-2000) — soit très en dessous, soit largement au-dessus
+sans signe de plafonnement dans la fenêtre de 2M ticks. `bushDensity=0.03`
+seed42 est le premier run de toute cette série de sessions où les 3
+clans survivent simultanément — signal encourageant mais pas une
+calibration aboutie. Le calibrage fin de densité/taux reste une tâche
+ouverte pour une session dédiée.
+
+### Hors scope (respecté)
+Arbres (toujours saturés au plafond du tableau, `Trees_StabilizeOverLongRun`
+reste rouge — tâche déjà connue, non traitée), gradient, split
+récolte/manger (le mécanisme lui-même, pas l'état FSM), territoires.
+
+### Prochaine fois
+- Calibrage fin de densité (la variance seed-à-seed n'est toujours pas
+  comprise — géographie de spawn ? compétition inter-clan ?).
+- Recalibrage des arbres sur un critère de lisibilité de paysage
+  (toujours pending, tâche s19 jamais reprise).
+- Étagement des tests xUnit (Fast/Slow) + budget de perf CI — différé
+  depuis la session de diagnostic de perf, toujours pas fait.
+- Mesure de la période d'oscillation une fois une densité stable
+  trouvée.

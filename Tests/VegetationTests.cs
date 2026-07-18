@@ -102,7 +102,14 @@ public class VegetationTests
         world.SetTerrainId(x, y, grass);
         world.ForceSpawnVegetation(x, y, bushType, matureStage);
         world.SetVegetationFoodRemaining(x, y, config.HarvestAmountPerTick);
-        world.SetAgentHunger(0, 200);
+
+        // Depuis la session 18, la faim ne declenche plus un
+        // deplacement vers un buisson (manger se fait depuis le pool du
+        // clan, sans bouger) -- seul un cueilleur en Harvesting epuise
+        // reellement un buisson. Force directement cet etat (seam de
+        // test) plutot que de dependre du declencheur probabiliste.
+        world.SetAgentTarget(0, x, y);
+        world.SetAgentState(0, AgentState.Harvesting);
 
         for (int i = 0; i < 8; i++)
         {
@@ -179,6 +186,14 @@ public class VegetationTests
                 world.SetTerrainId(x, y, grass);
             }
         }
+
+        // SeedMinimumBushPerPatch (session 19) garantit un buisson par
+        // poche d'herbe DÈS LA CONSTRUCTION, sur le terrain d'origine --
+        // SetTerrainId ci-dessus ne les efface pas (seul le type de
+        // terrain change, pas la végétation dessus). Sans ce clear, des
+        // buissons résiduels de la construction faussent la mesure de
+        // diffusion locale que ce test isole.
+        world.ClearAllVegetation();
 
         vegetation.TryGetId("bush", out byte bushType);
 

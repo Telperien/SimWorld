@@ -57,6 +57,23 @@ public class ReproductionTests
         world.SetAgentHunger(0, 0);
         world.SetAgentHunger(1, 0);
 
+        // Isole le couple dans un clan qui n'appartient QU'À EUX (session
+        // 19c) : TryFindMate exige le même clan (candidate.ClanId ==
+        // female.ClanId), donc le couple doit partager un clan -- et
+        // depuis que manger n'est plus gaté par un état exclusif, un
+        // agent ambiant affamé du MÊME clan peut se remettre à manger dès
+        // que ce clan a un pool non vide (ci-dessous), se "dé-neutralisant"
+        // silencieusement. Réassigner tous les agents ambiants à un AUTRE
+        // clan élimine cette contamination à la racine, plutôt que de
+        // compter sur un pool trop petit pour être consommé à temps.
+        uint coupleClanId = world.GetAgent(0).ClanId;
+        world.SetAgentClanId(1, coupleClanId);
+        uint otherClanId = world.GetClan(0).Id == coupleClanId ? world.GetClan(1).Id : world.GetClan(0).Id;
+        for (int i = 2; i < world.AliveCount; i++)
+        {
+            world.SetAgentClanId(i, otherClanId);
+        }
+
         // Neutralise tout le reste de la population ambiante (au-dessus
         // du seuil "bien nourrie" mais loin de la mort de faim) : sans
         // ça, d'autres couples du monde ambiant pourraient aussi se
@@ -64,6 +81,32 @@ public class ReproductionTests
         for (int i = 2; i < world.AliveCount; i++)
         {
             world.SetAgentHunger(i, 200);
+        }
+
+        // Le pool du clan (session 18) est seedé à la construction,
+        // INDÉPENDAMMENT de la végétation -- sans ce zérotage, les
+        // agents ambiants ci-dessus mangent depuis la réserve bancaire
+        // de LEUR clan (désormais distinct de celui du couple) et
+        // redeviennent éligibles à la reproduction malgré le hunger=200
+        // ci-dessus.
+        for (int c = 0; c < world.ClanCount; c++)
+        {
+            world.SetClanFoodPool(c, 0);
+        }
+
+        // Le frein de reproduction (clanPoolRatio, session 18) bloque la
+        // conception si le pool du clan est vide -- sans redonner une
+        // réserve au clan DU COUPLE après le zérotage global ci-dessus,
+        // leur propre conception serait TOUJOURS bloquée elle aussi. Sans
+        // risque de contamination désormais : le clan du couple ne
+        // contient plus aucun agent ambiant.
+        for (int c = 0; c < world.ClanCount; c++)
+        {
+            if (world.GetClan(c).Id == coupleClanId)
+            {
+                world.SetClanFoodPool(c, 1_000_000);
+                break;
+            }
         }
 
         return (world, world.GetAgent(0).Id, world.GetAgent(1).Id);
@@ -104,8 +147,11 @@ public class ReproductionTests
         Assert.NotNull(newbornId);
 
         // Survit à une compaction : tue un autre agent pour forcer un
-        // swap-with-last, puis revérifie par Id, pas par index.
-        world.SetAgentHunger(2, 255);
+        // swap-with-last, puis revérifie par Id, pas par index. Mort par
+        // ÂGE (pas par faim, session 19b : AllowStarvationDeath=false par
+        // défaut ici, Hunger=255 ne tuerait plus jamais l'agent).
+        world.SetAgentLifespan(2, 4);
+        world.SetAgentAge(2, 3);
         for (int i = 0; i < 8; i++)
         {
             world.Tick(World.TickIntervalSeconds);
@@ -165,8 +211,17 @@ public class ReproductionTests
         world.SetAgentHunger(0, 200);
         int initialCount = world.AliveCount;
 
+        // Depuis la session 19c, manger est un effet PASSIF appliqué à
+        // chaque tick réel, indépendamment de l'état -- le clan du couple
+        // a un pool généreux (nécessaire pour que MakeFertileCouple ne
+        // bloque pas la reproduction des AUTRES tests via clanPoolRatio),
+        // donc la mère y puiserait automatiquement et redeviendrait "bien
+        // nourrie" en quelques ticks si on ne la re-affame pas ici. Ce
+        // test isole spécifiquement le frein Hunger >= HungerSeekThreshold,
+        // pas la disponibilité du pool -- réappliqué à chaque tick.
         for (int i = 0; i < 200; i++)
         {
+            world.SetAgentHunger(0, 200);
             world.Tick(World.TickIntervalSeconds);
         }
 
@@ -177,6 +232,13 @@ public class ReproductionTests
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
         var baseConfig = SimulationConfig.Load(File.ReadAllText(path));
-        return baseConfig with { MateSearchRadius = 10, BaseConceptionChance = 1.0, TargetFoodPerCapita = 0.1 };
+        // BaseHarvestChance=0 (session 19c) : depuis que manger n'est plus
+        // un état exclusif, un agent ambiant affamé (Hunger=200, "neutralisé"
+        // ci-dessous) redevient éligible à TryStartHarvesting -- sans ce
+        // verrou, il peut récolter, regarnir le pool de SON clan, puis
+        // remanger et repasser sous le seuil, se "dé-neutralisant" pendant
+        // la fenêtre du test. Le désactiver isole ces tests sur la seule
+        // mécanique de reproduction, indépendamment de la récolte.
+        return baseConfig with { MateSearchRadius = 10, BaseConceptionChance = 1.0, TargetFoodPerCapita = 0.1, BaseHarvestChance = 0.0 };
     }
 }

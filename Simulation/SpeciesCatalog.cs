@@ -63,5 +63,10 @@ public sealed class SpeciesCatalog
 
     public bool TryGetId(string name, out byte id) => _idByName.TryGetValue(name, out id);
 
+    // Nombre de races enregistrées (session 18, cycle des clans initiaux
+    // sur les races disponibles) -- suppose des ids contigus depuis 0,
+    // comme le reste du catalogue (_byId indexé par id).
+    public int Count => _byId.Length;
+
     private sealed record SpeciesDto(byte Id, uint LifespanTicks, uint LifespanVarianceTicks, uint MaturityAge, uint GestationTicks);
 }

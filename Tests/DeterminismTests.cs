@@ -40,6 +40,8 @@ public class DeterminismTests
         int trackedIndex = world.AliveCount - 1;
         uint trackedId = world.GetAgent(trackedIndex).Id;
 
+        // Mort par ÂGE (pas par faim, session 19b : AllowStarvationDeath
+        // =false par défaut, Hunger=254 ne tuerait plus jamais l'agent).
         int killed = 0;
         for (int i = 0; i < world.AliveCount && killed < 3; i++)
         {
@@ -47,7 +49,8 @@ public class DeterminismTests
             {
                 continue;
             }
-            world.SetAgentHunger(i, 254);
+            world.SetAgentLifespan(i, 4);
+            world.SetAgentAge(i, 3);
             killed++;
         }
 
@@ -88,6 +91,6 @@ public class DeterminismTests
             world.Tick(World.TickIntervalSeconds);
         }
 
-        Assert.Equal(16475275109242875677UL, world.Hash());
+        Assert.Equal(5609630853180351789UL, world.Hash());
     }
 }

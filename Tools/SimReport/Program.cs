@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using Simulation;
 
 int seed = 42;
@@ -9,6 +10,16 @@ bool scarcity = false;
 bool fire = false;
 int fireInterval = 5000;
 int fireRadius = 5;
+bool bench = false;
+string? seedsArg = null;
+double? bushDensityOverride = null;
+double? poolPerCapitaOverride = null;
+double? conceptionChanceOverride = null;
+double? harvestChanceOverride = null;
+double? treeSpreadChanceOverride = null;
+double? treeSpontaneousChanceOverride = null;
+int? agentCapacityMultiplierOverride = null;
+bool allowStarvationDeathOverride = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -35,6 +46,36 @@ for (int i = 0; i < args.Length; i++)
         case "--fire-radius":
             fireRadius = int.Parse(args[++i]);
             break;
+        case "--bench":
+            bench = true;
+            break;
+        case "--seeds":
+            seedsArg = args[++i];
+            break;
+        case "--bush-density":
+            bushDensityOverride = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            break;
+        case "--pool-per-capita":
+            poolPerCapitaOverride = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            break;
+        case "--conception-chance":
+            conceptionChanceOverride = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            break;
+        case "--harvest-chance":
+            harvestChanceOverride = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            break;
+        case "--tree-spread-chance":
+            treeSpreadChanceOverride = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            break;
+        case "--tree-spontaneous-chance":
+            treeSpontaneousChanceOverride = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+            break;
+        case "--agent-capacity-multiplier":
+            agentCapacityMultiplierOverride = int.Parse(args[++i]);
+            break;
+        case "--allow-starvation-death":
+            allowStarvationDeathOverride = true;
+            break;
     }
 }
 
@@ -44,15 +85,160 @@ var vegetationCatalog = VegetationCatalog.Load(File.ReadAllText(Path.Combine(bas
 var speciesCatalog = SpeciesCatalog.Load(File.ReadAllText(Path.Combine(basePath, "data", "species.json")));
 var baseConfig = SimulationConfig.Load(File.ReadAllText(Path.Combine(basePath, "data", "simulation.json")));
 
+// --bench : diagnostic de perf (session 18 suite) -- la simulation est-elle
+// superlineaire en population ? Construit des mondes a population CONTROLEE
+// (via AgentDensity), chauffe, chronometre un lot de ticks, rapporte le
+// cout par agent par tick. Sort avant le rapport normal (mode exclusif).
+if (bench)
+{
+    RunPopulationBenchmark(terrainCatalog, vegetationCatalog, speciesCatalog, baseConfig, seed, size);
+    return;
+}
+
+// --seeds 42,7 : deux World independants, aucun etat partage -- lance
+// des processus enfants en parallele (chacun re-invoque ce meme
+// executable avec --seed unique) plutot que des threads dans ce
+// process, pour rester simple/surete memoire sans toucher a la regle
+// mono-thread de /Simulation (qui ne s'applique qu'a la sim elle-meme,
+// pas au harnais /Tools). x2 (ou plus) gratuit en temps d'horloge murale.
+if (seedsArg != null)
+{
+    RunParallelSeeds(seedsArg, args);
+    return;
+}
+
+static void RunParallelSeeds(string seedsArg, string[] originalArgs)
+{
+    int[] seedList = seedsArg.Split(',').Select(int.Parse).ToArray();
+    string hostPath = Process.GetCurrentProcess().MainModule!.FileName!;
+    string assemblyPath = Environment.GetCommandLineArgs()[0];
+
+    var tasks = new List<(int Seed, Process Process, Task<string> Output)>();
+    foreach (int s in seedList)
+    {
+        var childArgs = new List<string> { assemblyPath };
+        for (int i = 0; i < originalArgs.Length; i++)
+        {
+            if (originalArgs[i] == "--seeds")
+            {
+                i++;
+                continue;
+            }
+            childArgs.Add(originalArgs[i]);
+        }
+        childArgs.Add("--seed");
+        childArgs.Add(s.ToString());
+
+        var psi = new ProcessStartInfo(hostPath) { RedirectStandardOutput = true, UseShellExecute = false };
+        foreach (string a in childArgs)
+        {
+            psi.ArgumentList.Add(a);
+        }
+
+        var process = new Process { StartInfo = psi };
+        process.Start();
+        Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+        tasks.Add((s, process, outputTask));
+    }
+
+    foreach (var (s, process, outputTask) in tasks)
+    {
+        string output = outputTask.GetAwaiter().GetResult();
+        process.WaitForExit();
+        Console.WriteLine($"===== seed {s} =====");
+        Console.WriteLine(output);
+    }
+}
+
+static void RunPopulationBenchmark(TerrainCatalog terrainCatalog, VegetationCatalog vegetationCatalog,
+    SpeciesCatalog speciesCatalog, SimulationConfig baseConfig, int seed, int size)
+{
+    const int warmupTicks = 2000;
+    const int measureTicks = 3000;
+    int[] targetPopulations = { 100, 500, 1000, 2000, 5000, 15000, 30000 };
+
+    Console.WriteLine($"SimReport --bench -- seed={seed} size={size} warmup={warmupTicks} measure={measureTicks}");
+    Console.WriteLine();
+    Console.WriteLine($"{"popCible",8} {"popDebut",8} {"popFin",7} {"msTotal",8} {"us/tick",9} {"us/agent/tick",14}");
+
+    foreach (int targetPop in targetPopulations)
+    {
+        double density = (double)targetPop / (size * size);
+        // Multiplicateur de capacite reduit pour le benchmark : a
+        // grande population cible, le multiplicateur par defaut (200)
+        // ferait exploser la memoire du tableau Agent[] pour rien (le
+        // benchmark ne teste pas la croissance de population).
+        var config = baseConfig with { AgentDensity = density, AgentCapacityMultiplier = 3 };
+        var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, config);
+
+        for (int i = 0; i < warmupTicks; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        int popStart = world.AliveCount;
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < measureTicks; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+        sw.Stop();
+        int popEnd = world.AliveCount;
+
+        double avgPop = Math.Max(1, (popStart + popEnd) / 2.0);
+        double usPerTick = sw.Elapsed.TotalMilliseconds * 1000.0 / measureTicks;
+        double usPerAgentPerTick = usPerTick / avgPop;
+
+        Console.WriteLine($"{targetPop,8} {popStart,8} {popEnd,7} {sw.Elapsed.TotalMilliseconds,8:F0} {usPerTick,9:F2} {usPerAgentPerTick,14:F4}");
+    }
+}
+
 // Densite d'agents en hausse, capacite vegetale en baisse : force une
 // vraie pression (declin qui ralentit nettement, pas un massacre total).
 var config = scarcity
     ? baseConfig with { AgentDensity = 0.0011, BushDensity = 0.03, TreeDensity = 0.012 }
     : baseConfig;
 
+// Balayage de densite (session 19) : override ponctuel sans toucher au
+// fichier de config, pour sweeper plusieurs valeurs sans rebuild entre
+// chaque run.
+if (bushDensityOverride.HasValue)
+{
+    config = config with { BushDensity = bushDensityOverride.Value };
+}
+if (poolPerCapitaOverride.HasValue)
+{
+    config = config with { TargetFoodPoolPerCapita = poolPerCapitaOverride.Value };
+}
+if (conceptionChanceOverride.HasValue)
+{
+    config = config with { BaseConceptionChance = conceptionChanceOverride.Value };
+}
+if (harvestChanceOverride.HasValue)
+{
+    config = config with { BaseHarvestChance = harvestChanceOverride.Value };
+}
+if (treeSpreadChanceOverride.HasValue)
+{
+    config = config with { TreeSpreadChance = treeSpreadChanceOverride.Value };
+}
+if (treeSpontaneousChanceOverride.HasValue)
+{
+    config = config with { TreeSpontaneousChance = treeSpontaneousChanceOverride.Value };
+}
+if (agentCapacityMultiplierOverride.HasValue)
+{
+    config = config with { AgentCapacityMultiplier = agentCapacityMultiplierOverride.Value };
+}
+if (allowStarvationDeathOverride)
+{
+    config = config with { AllowStarvationDeath = true };
+}
+
 vegetationCatalog.TryGetId("bush", out byte bushType);
 vegetationCatalog.TryGetId("tree", out byte treeType);
 
+var overallStopwatch = Stopwatch.StartNew();
 var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, config);
 
 // Stimulus externe (comme un clic joueur) : Rng local au rapport, seede
@@ -68,7 +254,8 @@ if (world.AgentSpawnCapped)
 const int ageBuckets = 10;
 
 var samples = new List<(int Tick, int Pop, int BushYoung, int BushMature, int Tree, int Grass, int Ash,
-    int HungerDeathsCum, int AgeDeathsCum, int BirthsCum, int BirthsRefusedCum, double AgentStdDev, int[] AgeHistogram)>();
+    int HungerDeathsCum, int AgeDeathsCum, int BirthsCum, int BirthsRefusedCum, double AgentStdDev, int[] AgeHistogram,
+    int[] PoolPerClan)>();
 
 void Sample(int tick)
 {
@@ -88,6 +275,12 @@ void Sample(int tick)
         }
     }
 
+    var poolPerClan = new int[world.ClanCount];
+    for (int c = 0; c < world.ClanCount; c++)
+    {
+        poolPerClan[c] = world.GetClan(c).FoodPool;
+    }
+
     samples.Add((
         tick,
         world.AliveCount,
@@ -101,13 +294,22 @@ void Sample(int tick)
         world.BirthsTotal,
         world.BirthsRefusedArrayFull,
         world.AgentDensityStdDev(),
-        ageHistogram));
+        ageHistogram,
+        poolPerClan));
 }
 
 Sample(0);
 
 int sampleInterval = Math.Max(1, ticks / 20);
 var stopwatch = Stopwatch.StartNew();
+
+// Chronometrage separe simulation vs instrumentation (diagnostic de
+// perf, cf. plan) : tickStopwatch n'entoure QUE world.Tick -- rien
+// d'autre. Jamais dans /Simulation (interdit par CLAUDE.md), acceptable
+// ici : /Tools est le harnais, pas la sim.
+var tickStopwatch = new Stopwatch();
+var connectivityStopwatch = new Stopwatch();
+var sampleStopwatch = new Stopwatch();
 
 // Points de controle pour l'evolution de la connectivite d'herbe
 // (session 17b, partie 1.2) : uniquement les points demandes qui
@@ -124,7 +326,9 @@ if (connectivityCheckpointTicks.Count == 0 || connectivityCheckpointTicks[^1] !=
 var connectivitySamples = new List<(int Tick, GrassConnectivityReport Report)>();
 if (connectivityCheckpointTicks.Contains(0))
 {
+    connectivityStopwatch.Start();
     connectivitySamples.Add((0, world.AnalyzeGrassConnectivity()));
+    connectivityStopwatch.Stop();
 }
 
 for (int i = 0; i < ticks; i++)
@@ -136,16 +340,22 @@ for (int i = 0; i < ticks; i++)
         world.Execute(new SpawnFire(fireX, fireY, fireRadius));
     }
 
+    tickStopwatch.Start();
     world.Tick(World.TickIntervalSeconds);
+    tickStopwatch.Stop();
 
     if ((i + 1) % sampleInterval == 0 || i == ticks - 1)
     {
+        sampleStopwatch.Start();
         Sample(i + 1);
+        sampleStopwatch.Stop();
     }
 
     if (connectivityCheckpointTicks.Contains(i + 1))
     {
+        connectivityStopwatch.Start();
         connectivitySamples.Add((i + 1, world.AnalyzeGrassConnectivity()));
+        connectivityStopwatch.Stop();
     }
 }
 
@@ -155,8 +365,9 @@ string flags = (scarcity ? " --scarcity" : "") + (fire ? $" --fire (interval={fi
 Console.WriteLine($"SimReport -- seed={seed} size={size} ticks={ticks}{flags}");
 Console.WriteLine($"Duree: {stopwatch.Elapsed.TotalSeconds:F2}s");
 Console.WriteLine();
+string poolHeader = string.Concat(Enumerable.Range(0, world.ClanCount).Select(c => $" {"pool" + c,8}"));
 Console.WriteLine($"{"tick",8} {"pop",6} {"bjeune",7} {"bmur",6} {"arbre",6} {"herbe",8} {"cendre",7} " +
-    $"{"faimD",6} {"ageD",5} {"naisD",6} {"refusD",7} {"stdAgt",7}");
+    $"{"faimD",6} {"ageD",5} {"naisD",6} {"refusD",7} {"stdAgt",7}{poolHeader}");
 for (int s = 0; s < samples.Count; s++)
 {
     var cur = samples[s];
@@ -167,11 +378,12 @@ for (int s = 0; s < samples.Count; s++)
     int ageD = s == 0 ? cur.AgeDeathsCum : cur.AgeDeathsCum - samples[s - 1].AgeDeathsCum;
     int birthsD = s == 0 ? cur.BirthsCum : cur.BirthsCum - samples[s - 1].BirthsCum;
     int refusedD = s == 0 ? cur.BirthsRefusedCum : cur.BirthsRefusedCum - samples[s - 1].BirthsRefusedCum;
+    string poolCols = string.Concat(cur.PoolPerClan.Select(p => $" {p,8}"));
     Console.WriteLine($"{cur.Tick,8} {cur.Pop,6} {cur.BushYoung,7} {cur.BushMature,6} {cur.Tree,6} {cur.Grass,8} {cur.Ash,7} " +
-        $"{hungerD,6} {ageD,5} {birthsD,6} {refusedD,7} {cur.AgentStdDev,7:F2}");
+        $"{hungerD,6} {ageD,5} {birthsD,6} {refusedD,7} {cur.AgentStdDev,7:F2}{poolCols}");
 }
 
-int idle = 0, moving = 0, seeking = 0, eating = 0;
+int idle = 0, moving = 0, seeking = 0, harvesting = 0;
 for (int i = 0; i < world.AliveCount; i++)
 {
     switch (world.GetAgent(i).State)
@@ -179,12 +391,15 @@ for (int i = 0; i < world.AliveCount; i++)
         case AgentState.Idle: idle++; break;
         case AgentState.Moving: moving++; break;
         case AgentState.Seeking: seeking++; break;
-        case AgentState.Eating: eating++; break;
+        case AgentState.Harvesting: harvesting++; break;
     }
 }
 
 Console.WriteLine();
-Console.WriteLine($"Etats agents (fin de run): Idle={idle} Moving={moving} Seeking={seeking} Eating={eating}");
+// Manger n'est plus un etat depuis la session 19c (effet passif, ne
+// figure donc plus dans cette repartition d'etats FSM).
+Console.WriteLine($"Etats agents (fin de run): Idle={idle} Moving={moving} Seeking={seeking} Harvesting={harvesting}");
+Console.WriteLine($"Cueilleurs actifs (Seeking-vers-buisson + Harvesting) : {seeking + harvesting}");
 
 int half = size / 2;
 int[] quadrants = new int[4];
@@ -238,6 +453,12 @@ double clusterDistanceSum = 0.0;
 int clusterAttempts = 0;
 int clusterMaxAttempts = clusterSampleTarget * 50;
 
+// Suspect n°1 du diagnostic de perf (cf. plan) : DistanceToNearestMatureBush
+// est O(BushCount) par appel, jusqu'a 2000 points -> jusqu'a ~2000×BushCount
+// operations. Chronometre a part pour verifier si c'est bien negligeable
+// face au cout total du tick (appelee UNE FOIS en fin de rapport, pas par
+// tick).
+var clusteringStopwatch = Stopwatch.StartNew();
 while (clusterSamples < clusterSampleTarget && clusterAttempts < clusterMaxAttempts)
 {
     clusterAttempts++;
@@ -255,6 +476,7 @@ while (clusterSamples < clusterSampleTarget && clusterAttempts < clusterMaxAttem
         clusterSamples++;
     }
 }
+clusteringStopwatch.Stop();
 
 Console.WriteLine();
 if (clusterSamples > 0)
@@ -314,6 +536,28 @@ Console.WriteLine();
 Console.WriteLine($"Naissances cumulees: {world.BirthsTotal}");
 Console.WriteLine($"Naissances refusees (tableau plein): {world.BirthsRefusedArrayFull}");
 Console.WriteLine($"Naissances perdues (tuile non sure): {world.BirthsLostToUnsafeTile}");
+
+// --- Clans (session 18) ---
+Console.WriteLine();
+Console.WriteLine("--- Clans (session 18) ---");
+int[] clanPopulation = new int[world.ClanCount];
+for (int i = 0; i < world.AliveCount; i++)
+{
+    clanPopulation[world.GetAgent(i).ClanId]++;
+}
+
+long totalHarvested = 0, totalConsumed = 0;
+for (int c = 0; c < world.ClanCount; c++)
+{
+    Clan clan = world.GetClan(c);
+    long harvestedCum = world.GetClanFoodHarvestedCumulative(c);
+    long consumedCum = world.GetClanFoodConsumedCumulative(c);
+    totalHarvested += harvestedCum;
+    totalConsumed += consumedCum;
+    Console.WriteLine($"  Clan {c} (espece {clan.Species}) : pop={clanPopulation[c],5} (creux min jamais observe={world.GetClanMinAliveEverObserved(c),5})  pool={clan.FoodPool,6}  " +
+        $"recolte cumulee={harvestedCum,8} consommee cumulee={consumedCum,8}  morts faim={world.GetClanHungerDeaths(c),5} morts age={world.GetClanAgeDeaths(c),5}");
+}
+Console.WriteLine($"  Total : recolte cumulee={totalHarvested} consommee cumulee={totalConsumed}");
 
 // Histogrammes des ages a 4 instants choisis APRES COUP sur la courbe
 // de population deja collectee (session 14b, diagnostic boom-bust) :
@@ -423,13 +667,18 @@ if (totalHungerDeaths > 0)
     }
 
     Console.WriteLine();
+    // Depuis la session 19c, manger n'est plus un etat exclusif (effet
+    // passif applique a tout etat) -- Eating peut donc se CHEVAUCHER avec
+    // Idle/Moving/Seeking (un Harvesting affame mange sans quitter son
+    // etat). Ce n'est plus une partition exclusive du temps de vie, donc
+    // les pourcentages ci-dessous ne somment plus a 100%.
     double lifeTicks = world.AverageDeathTicksIdle + world.AverageDeathTicksMoving
         + world.AverageDeathTicksSeeking + world.AverageDeathTicksEating;
     Console.WriteLine($"Echecs de recherche consecutifs (moyenne avant la mort) : {world.AverageDeathFailureStreak:F1}");
     Console.WriteLine($"Faim au dernier repas commence (moyenne)                : {world.AverageDeathHungerAtLastMeal:F1}");
     if (lifeTicks > 0)
     {
-        Console.WriteLine($"Repartition du temps de vie (moyenne) : " +
+        Console.WriteLine($"Repartition du temps de vie (moyenne, chevauchement possible avec Eating) : " +
             $"Idle={100.0 * world.AverageDeathTicksIdle / lifeTicks:F1}% " +
             $"Moving={100.0 * world.AverageDeathTicksMoving / lifeTicks:F1}% " +
             $"Seeking={100.0 * world.AverageDeathTicksSeeking / lifeTicks:F1}% " +
@@ -439,3 +688,21 @@ if (totalHungerDeaths > 0)
 
 Console.WriteLine();
 Console.WriteLine($"Hash final: 0x{world.Hash():X16}");
+
+// --- Perf : simulation vs instrumentation (diagnostic, cf. plan) ---
+overallStopwatch.Stop();
+double totalMs = overallStopwatch.Elapsed.TotalMilliseconds;
+double tickMs = tickStopwatch.Elapsed.TotalMilliseconds;
+double connectivityMs = connectivityStopwatch.Elapsed.TotalMilliseconds;
+double sampleMs = sampleStopwatch.Elapsed.TotalMilliseconds;
+double clusteringMs = clusteringStopwatch.Elapsed.TotalMilliseconds;
+double otherMs = Math.Max(0, totalMs - tickMs - connectivityMs - sampleMs - clusteringMs);
+
+Console.WriteLine();
+Console.WriteLine("--- Perf (diagnostic) ---");
+Console.WriteLine($"  Total run                         : {totalMs,10:F0} ms (100,0%)");
+Console.WriteLine($"  world.Tick (simulation pure)       : {tickMs,10:F0} ms ({100.0 * tickMs / totalMs,5:F1}%)  -- {tickMs / ticks * 1000.0:F2} us/tick, {tickMs / ticks / Math.Max(1, world.AliveCount) * 1000.0:F3} us/agent/tick (population fin de run)");
+Console.WriteLine($"  Connectivite herbe ({connectivitySamples.Count} appels)     : {connectivityMs,10:F0} ms ({100.0 * connectivityMs / totalMs,5:F1}%)");
+Console.WriteLine($"  Clusterisation (1 appel, {clusterSamples} points): {clusteringMs,10:F0} ms ({100.0 * clusteringMs / totalMs,5:F1}%)");
+Console.WriteLine($"  Echantillonnage ({samples.Count} appels)        : {sampleMs,10:F0} ms ({100.0 * sampleMs / totalMs,5:F1}%)");
+Console.WriteLine($"  Autre (rapport final, etc.)        : {otherMs,10:F0} ms ({100.0 * otherMs / totalMs,5:F1}%)");
