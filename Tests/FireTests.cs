@@ -5,7 +5,7 @@ namespace Tests;
 public class FireTests
 {
 
-    private static void FillGrass(World world, TerrainCatalog catalog, int minX, int minY, int maxX, int maxY)
+    private static void FillGrass(World world, Catalog<TerrainType> catalog, int minX, int minY, int maxX, int maxY)
     {
         catalog.TryGetId("grass", out byte grass);
         for (int y = minY; y <= maxY; y++)

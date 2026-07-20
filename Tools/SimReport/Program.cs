@@ -163,8 +163,8 @@ static void RunParallelSeeds(string seedsArg, string[] originalArgs)
     }
 }
 
-static void RunPopulationBenchmark(TerrainCatalog terrainCatalog, VegetationCatalog vegetationCatalog,
-    SpeciesCatalog speciesCatalog, SimulationConfig baseConfig, int seed, int size)
+static void RunPopulationBenchmark(Catalog<TerrainType> terrainCatalog, Catalog<VegetationType> vegetationCatalog,
+    Catalog<SpeciesType> speciesCatalog, SimulationConfig baseConfig, int seed, int size)
 {
     const int warmupTicks = 2000;
     const int measureTicks = 3000;

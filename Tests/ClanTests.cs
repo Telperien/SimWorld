@@ -8,7 +8,7 @@ public class ClanTests
     // Catalogue synthetique : mature immediatement, gestation courte,
     // conception quasi garantie -- meme patron que ReproductionTests
     // (deterministe, independant du tuning reel du jeu).
-    private static SpeciesCatalog MakeFertileSpeciesCatalog()
+    private static Catalog<SpeciesType> MakeFertileSpeciesCatalog()
     {
         return SpeciesCatalog.Load("""
         {
@@ -31,7 +31,7 @@ public class ClanTests
     // leur cellule de grille pour que le frein progressif ne bloque pas
     // la conception -- meme patron que ReproductionTests.MakeFertileCouple.
     private static World MakeFertileCouple(
-        TerrainCatalog catalog, VegetationCatalog vegetation, SpeciesCatalog species, SimulationConfig config, int seed)
+        Catalog<TerrainType> catalog, Catalog<VegetationType> vegetation, Catalog<SpeciesType> species, SimulationConfig config, int seed)
     {
         var world = new World(seed, size: 128, catalog, vegetation, species, config);
         world.ClearAllVegetation();
@@ -277,42 +277,9 @@ public class ClanTests
         }
     }
 
-    // "LE test de la falaise" (plan, point 5) : le pool qui touche zero
-    // brievement puis se regarnit est le comportement voulu, ce qui
-    // compte est qu'AUCUN clan ne s'effondre en population a cause de
-    // ca. Fusionne l'assertion "aucun clan eteint en fin de run" du plan
-    // (Population_PerClan_RemainsViable) dans le MEME run 2M ticks --
-    // evite un doublon de run couteux (meme raisonnement qu'en s15).
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Clan_PoolNeverCollapsesToZero_InNormalConditions(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        for (int i = 0; i < 2_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-
-        int[] finalPopulation = new int[world.ClanCount];
-        for (int i = 0; i < world.AliveCount; i++)
-        {
-            finalPopulation[world.GetAgent(i).ClanId]++;
-        }
-
-        for (int c = 0; c < world.ClanCount; c++)
-        {
-            Assert.True(world.GetClanMinAliveEverObserved(c) > 20,
-                $"clan {c} : creux minimum {world.GetClanMinAliveEverObserved(c)} sur toute la duree -- effondrement lie au pool ?");
-            Assert.True(finalPopulation[c] > 0,
-                $"clan {c} : eteint en fin de run (population finale 0)");
-        }
-    }
+    // Clan_PoolNeverCollapsesToZero_InNormalConditions (2M ticks) déplacé
+    // dans Tests/SlowTests.cs (session refactor), cf. AgentTests.cs pour
+    // le raisonnement (parallélisme xUnit entre classes).
 
     private static int FindClanIndex(World world, uint clanId)
     {

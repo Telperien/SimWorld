@@ -11,9 +11,9 @@ public partial class WorldRenderer : Sprite2D
 
     public World World { get; private set; } = null!;
 
-    private TerrainCatalog _catalog = null!;
-    private VegetationCatalog _vegetationCatalog = null!;
-    private SpeciesCatalog _speciesCatalog = null!;
+    private Catalog<TerrainType> _catalog = null!;
+    private Catalog<VegetationType> _vegetationCatalog = null!;
+    private Catalog<SpeciesType> _speciesCatalog = null!;
     private Image _image = null!;
     private ImageTexture _texture = null!;
     private double _accumulator;

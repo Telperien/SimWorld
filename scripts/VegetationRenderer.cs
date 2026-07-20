@@ -15,7 +15,7 @@ public partial class VegetationRenderer : Node2D
     private const ulong SpriteSeed = 1234;
 
     private World _world = null!;
-    private VegetationCatalog _vegetationCatalog = null!;
+    private Catalog<VegetationType> _vegetationCatalog = null!;
     private byte _bushTypeId;
     private byte _treeTypeId;
     private int _bushMatureStage;

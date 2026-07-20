@@ -157,7 +157,7 @@ for (int b = 0; b < bushPerColBand.Length; b++)
     }
 }
 
-static void PrintRunLengthEncoded(Func<int, byte> terrainAt, int length, TerrainCatalog catalog)
+static void PrintRunLengthEncoded(Func<int, byte> terrainAt, int length, Catalog<TerrainType> catalog)
 {
     int runStart = 0;
     byte runId = terrainAt(0);
@@ -177,7 +177,7 @@ static void PrintRunLengthEncoded(Func<int, byte> terrainAt, int length, Terrain
     }
 }
 
-static string TerrainName(TerrainCatalog catalog, byte id)
+static string TerrainName(Catalog<TerrainType> catalog, byte id)
 {
     try
     {

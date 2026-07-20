@@ -942,3 +942,53 @@ les foyers). Aucun nouveau gameplay.
 - Grep `System.IO`/`Godot` dans `/Simulation` : rien, confirmé après
   tous les changements de cette session.
 - `git status` propre, commit unique, permission avant push.
+
+## Session refactor — World.cs décomposé en systèmes (comportement invariant)
+
+### Contexte
+`World.cs` faisait 2754 lignes et mélangeait tous les systèmes
+(terrain, feu, végétation, agents, clans/récolte/reproduction) --
+signalé par deux revues externes comme god class, un risque pour les
+sessions à venir (foyers, bâtiments, territoires, castes...) qui
+n'auraient fait qu'empiler sur ce monolithe. Décomposition par LOTS
+vérifiés (build + tier fast + golden-hash après CHAQUE lot), comme
+demandé -- aucune logique, aucun ordre de tick, aucune valeur de
+`simulation.json` touché.
+
+### Résultat
+`World.cs` : 2754 → 542 lignes. Nouveaux fichiers : `Catalog.cs`
+(générique, remplace la duplication à ~95% entre `TerrainCatalog`/
+`VegetationCatalog`/`SpeciesCatalog`), `TerrainSystem.cs`,
+`FireSystem.cs`, `VegetationSystem.cs`, `AgentClanSystem.cs` (agents ET
+clans dans une seule classe -- leur cycle de dépendance mutuelle est un
+couplage de domaine réel, pas un accident d'implémentation à corriger
+par une séparation artificielle). `World.cs` ne garde que
+l'orchestration : construction/câblage des systèmes, `Tick()`,
+`Hash()`, ~40 forwards publics préservant chaque signature de test
+existante.
+
+**Golden-hash resté BYTE-IDENTIQUE du début à la fin** (vérifié à
+chaque lot, ~20 étapes) : preuve directe que le refactor n'a changé
+aucun comportement, seulement la structure du code.
+
+### Tiering Fast/Slow (complété cette session)
+`[Trait("Speed","Slow")]` sur 8 classes dans `Tests/SlowTests.cs`
+(tests 500k-2M ticks, un test par classe pour paralléliser entre
+classes via xUnit -- `Tests/xunit.runner.json`). `dotnet test --filter
+"Speed!=Slow"` : tier fast, ~55 tests, <1s. 3 tests de calibrage déjà
+connus comme rouges (arbres, oscillation, limite tableau -- cf.
+sessions 19/19b) marqués `Skip` avec la raison et la session de
+référence dans le message, PAS corrigés (calibrage de densité hors
+scope, reporté).
+
+### Vérification
+- `dotnet build` (Simulation, Tests, Tools/SimReport, Tools/RenderDump,
+  WorldSim.csproj) : tous verts.
+- `dotnet test --filter "Speed!=Slow"` : tous verts à chaque lot.
+- Golden-hash : INCHANGÉ (valeur committée avant refactor toujours
+  valide).
+- Grep `System.IO`/`Godot` dans `/Simulation` : rien (le seul match est
+  un commentaire dans `SpriteGenerator.cs`, pas un `using`).
+- `git status` : commit dédié à ce refactor seul (le travail de la
+  session foyers, démarrée dans le même intervalle, est committé
+  séparément).

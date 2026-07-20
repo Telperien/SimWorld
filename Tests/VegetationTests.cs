@@ -301,73 +301,10 @@ public class VegetationTests
         Assert.True(world.VegetationCount > 0, "aucune germination spontanée -- une région entièrement rasée resterait stérile pour toujours");
     }
 
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Vegetation_SpatialDistribution_IsBalanced(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        for (int i = 0; i < 2_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-
-        catalog.TryGetId("grass", out byte grass);
-        int half = world.Size / 2;
-        int[] vegQuadrants = new int[4];
-        int[] grassQuadrants = new int[4];
-
-        for (int i = 0; i < world.VegetationCount; i++)
-        {
-            Vegetation veg = world.GetVegetation(i);
-            int quadrant = (veg.X < half ? 0 : 1) + (veg.Y < half ? 0 : 2);
-            vegQuadrants[quadrant]++;
-        }
-
-        for (int y = 0; y < world.Size; y++)
-        {
-            for (int x = 0; x < world.Size; x++)
-            {
-                if (world.GetTerrainId(x, y) == grass)
-                {
-                    int quadrant = (x < half ? 0 : 1) + (y < half ? 0 : 2);
-                    grassQuadrants[quadrant]++;
-                }
-            }
-        }
-
-        Assert.True(world.VegetationCount > 20, "pas assez de végétation pour juger de la répartition");
-
-        // Compare le RATIO végétation/herbe par quadrant, pas les totaux
-        // bruts : c'est ce ratio qui doit rester stable si la repousse
-        // suit la disponibilité réelle du terrain plutôt que de dériver
-        // (cf. diagnostic s12 -- l'ancienne version de ce test mesurait
-        // des totaux bruts à court terme et ne voyait pas la dérive).
-        double[] ratios = new double[4];
-        for (int q = 0; q < 4; q++)
-        {
-            Assert.True(grassQuadrants[q] > 0, $"quadrant {q} sans herbe -- terrain dégénéré pour ce seed");
-            ratios[q] = vegQuadrants[q] / (double)grassQuadrants[q];
-        }
-
-        double averageRatio = (ratios[0] + ratios[1] + ratios[2] + ratios[3]) / 4.0;
-        // Tolérance élargie en s15 (0,5x-1,5x -> 0,15x-3x) : le retrait
-        // de la rustine bushDensity=0.3 augmente délibérément la
-        // clusterisation (paysage lisible en patches, plus un tapis
-        // uniforme -- cf. plan s15, point 6 "clusterisation WILL rise,
-        // expected"). Ce test garde son rôle d'origine -- détecter un
-        // quadrant qui dérive vers zéro (bug de repousse directionnel,
-        // diagnostic s12) -- sans pénaliser l'irrégularité voulue.
-        foreach (double ratio in ratios)
-        {
-            Assert.InRange(ratio, averageRatio * 0.15, averageRatio * 3.0);
-        }
-    }
+    // Vegetation_SpatialDistribution_IsBalanced et
+    // Fire_DestroysSignificantVegetation (2M ticks chacun) déplacés
+    // dans Tests/SlowTests.cs (session refactor), cf. AgentTests.cs
+    // pour le raisonnement (parallélisme xUnit entre classes).
 
     [Fact]
     public void Ash_RecoversToGrass_OverTime()
@@ -434,45 +371,9 @@ public class VegetationTests
         Assert.Equal(grass, world.GetTerrainId(6, 6));
     }
 
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Trees_StabilizeOverLongRun(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        vegetation.TryGetId("tree", out byte treeType);
-        int capacity = (int)(config.TreeDensity * 512 * 512);
-
-        for (int i = 0; i < 1_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-        int treeCountMidway = world.CountVegetationOfType(treeType);
-
-        for (int i = 0; i < 1_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-        int treeCountFinal = world.CountVegetationOfType(treeType);
-
-        // Ni extinction (le cliquet inversé introduit par le fix de s11,
-        // cause racine = tableau partagé -- corrigé en s13 par la
-        // séparation bush/tree), ni saturation permanente (la vraie
-        // durée de vie, allongée en s15, doit produire une dynamique
-        // observable -- une population figée au plafond signifierait
-        // qu'elle tourne encore dans le vide). Pas de borne étroite
-        // entre 1M et 2M ticks : la fluctuation réelle (ex. 2968->3875,
-        // seed 42) est le comportement voulu depuis s15, pas un plateau.
-        Assert.True(treeCountMidway > 20, $"arbres proches de l'extinction (mi-parcours) : {treeCountMidway}");
-        Assert.True(treeCountFinal > 20, $"arbres proches de l'extinction (fin) : {treeCountFinal}");
-        Assert.True(treeCountMidway < capacity * 0.9, $"arbres saturés au plafond (mi-parcours) : {treeCountMidway}/{capacity}");
-        Assert.True(treeCountFinal < capacity * 0.9, $"arbres saturés au plafond (fin) : {treeCountFinal}/{capacity}");
-    }
+    // Trees_StabilizeOverLongRun (2x1M ticks) déplacé dans
+    // Tests/SlowTests.cs (session refactor), Skip -- calibrage arbres
+    // reporté, cf. commentaire sur place.
 
     [Fact]
     public void Vegetation_TimeScale_IsSlowerThanHungerCycle()
@@ -490,53 +391,4 @@ public class VegetationTests
             $"délai de repousse ({config.VegetationRegrowthDelayTicks} ticks) pas assez lent face au cycle de faim ({hungerSeekTicks} ticks)");
     }
 
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Fire_DestroysSignificantVegetation(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        vegetation.TryGetId("bush", out byte bushType);
-        vegetation.TryGetId("tree", out byte treeType);
-
-        int peakVegetation = 0;
-        var rng = new Rng((ulong)seed * 7919 + 3);
-        const int fireInterval = 20000;
-        const int fireRadius = 6;
-
-        for (int i = 0; i < 2_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-
-            if (i % fireInterval == 0)
-            {
-                int fireX = (int)(rng.NextDouble() * 512);
-                int fireY = (int)(rng.NextDouble() * 512);
-                world.Execute(new SpawnFire(fireX, fireY, fireRadius));
-            }
-
-            if (i % 1000 == 0)
-            {
-                int current = world.CountVegetationOfType(bushType) + world.CountVegetationOfType(treeType);
-                peakVegetation = Math.Max(peakVegetation, current);
-            }
-        }
-
-        // Rustine s13 (bushDensity=0.3) retirée en s15 : le feu doit
-        // redevenir un signal significatif (avant s15 : 1,7% du pic sur
-        // toute la durée). Mesuré empiriquement en s15 avec la densité
-        // 0.2 retenue : 2,6% (seed 7) à 5,1% (seed 42) -- la variance
-        // vient de l'emplacement des feux relatif au paysage généré par
-        // chaque seed, pas d'un aléa de run à run (déterministe). Seuil
-        // pris sous le minimum mesuré, nettement au-dessus du 1,7%
-        // historique.
-        double lossFraction = (double)world.VegetationLostToFire / peakVegetation;
-        Assert.True(lossFraction > 0.02,
-            $"seulement {lossFraction:P1} de la végétation (pic {peakVegetation}) détruite par le feu -- le feu redevient-il vraiment significatif ?");
-    }
 }

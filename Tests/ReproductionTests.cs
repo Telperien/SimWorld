@@ -9,7 +9,7 @@ public class ReproductionTests
     // conception quasi garantie -- un test déterministe qui ne dépend
     // pas du tuning réel du jeu (maturityAge/gestationTicks réels sont
     // bien plus grands).
-    private static SpeciesCatalog MakeFertileSpeciesCatalog()
+    private static Catalog<SpeciesType> MakeFertileSpeciesCatalog()
     {
         return SpeciesCatalog.Load("""
         {
@@ -22,7 +22,7 @@ public class ReproductionTests
     // leur cellule de grille pour que le frein progressif (nourriture
     // locale / population locale) ne bloque pas la conception.
     private static (World world, uint motherId, uint fatherId) MakeFertileCouple(
-        TerrainCatalog catalog, VegetationCatalog vegetation, SpeciesCatalog species, SimulationConfig config, int seed)
+        Catalog<TerrainType> catalog, Catalog<VegetationType> vegetation, Catalog<SpeciesType> species, SimulationConfig config, int seed)
     {
         var world = new World(seed, size: 128, catalog, vegetation, species, config);
 

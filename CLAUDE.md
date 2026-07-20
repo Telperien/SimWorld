@@ -191,6 +191,22 @@ ParentClanId posé dès la création, même sans scissions.
 - Territoire des civs sur grille grossière (32² pour 512²), jamais par tuile.
 - Ne jamais élargir le scope. Un système manquant se signale, ne se construit pas.
 
+## Tests — tiers Fast/Slow
+- `dotnet test --filter "Speed!=Slow"` : tier fast (quelques minutes),
+  à lancer à chaque session.
+- `dotnet test --filter "Speed=Slow"` : tier slow (tests à 500k-2M
+  ticks, `Tests/SlowTests.cs`, ~1h), uniquement quand une session
+  change la dynamique (faim, récolte, reproduction, densité de
+  végétation, paramètres de clan) — pas pour un refactor à
+  comportement invariant.
+- `dotnet test` : tout, avant un commit de fin de chantier de
+  calibrage.
+- Le tier fast + le golden-hash (`Golden_Hash_MatchesCommittedValue`)
+  suffisent à valider un refactor qui ne touche aucune dynamique.
+- Un test du tier slow marqué `Skip` documente un calibrage reporté
+  (raison + session de référence dans le message) — jamais un fix
+  silencieux du monde pour le faire passer.
+
 ## Fin de session
 - Tests verts → commit atomique → 5 lignes dans JOURNAL.md
   (fait / cassé / prochaine fois).

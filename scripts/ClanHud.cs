@@ -7,7 +7,7 @@ using Simulation;
 public partial class ClanHud : Label
 {
     private World _world = null!;
-    private SpeciesCatalog _speciesCatalog = null!;
+    private Catalog<SpeciesType> _speciesCatalog = null!;
 
     public override void _Ready()
     {

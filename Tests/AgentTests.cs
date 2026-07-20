@@ -15,7 +15,7 @@ public class AgentTests
         return thinkTicksNeeded * 4;
     }
 
-    private static void MakeFoodless(World world, TerrainCatalog catalog)
+    private static void MakeFoodless(World world, Catalog<TerrainType> catalog)
     {
         catalog.TryGetId("sand", out byte sand);
         for (int y = 0; y < world.Size; y++)
@@ -252,24 +252,10 @@ public class AgentTests
         Assert.True(sawMoving);
     }
 
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Population_Survives_LongRun(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 256, catalog, vegetation, species, config);
-
-        for (int i = 0; i < 500_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-
-        Assert.True(world.AliveCount > 0);
-    }
+    // Population_Survives_LongRun (500k ticks) déplacé dans
+    // Tests/SlowTests.cs (session refactor) -- ne fait pas partie des
+    // tests de calibrage en échec, mais dépasse le seuil "<30s" du
+    // tier fast.
 
     [Fact]
     public void Agents_DieOfHunger_InScarcityScenario()
@@ -473,114 +459,11 @@ public class AgentTests
         Assert.True(world.MealsEaten > 0, "l'agent n'a jamais atteint le buisson malgré le gradient -- la cécité au-delà du BFS n'est pas réglée");
     }
 
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void StarvationDeaths_AreNotBlindDeaths(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        for (int i = 0; i < 2_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-
-        // Depuis la session 18 (split récolte/manger), la plupart des
-        // agents ne cherchent JAMAIS de nourriture -- ils mangent
-        // directement depuis le pool du clan, sans déplacement. Ce test
-        // ne mesure donc plus la cécité que pour les CUEILLEURS morts
-        // en transit/en récolte (LastSeekOutcome n'a de sens que pour
-        // eux, cf. StateAtDeath), pas pour l'ensemble des morts de faim
-        // (qui incluent désormais des morts "pool à sec" en Eating,
-        // sans rapport avec une recherche ratée).
-        int harvesterHungerDeaths = world.HungerDeathsWhileHarvesting;
-        if (harvesterHungerDeaths == 0)
-        {
-            return;
-        }
-
-        int[] seekOutcomeHistogram = world.GetDeathSeekOutcomeHistogram();
-        int blindDeaths = seekOutcomeHistogram[SeekOutcome.BlindWander];
-
-        double blindFraction = (double)blindDeaths / harvesterHungerDeaths;
-        Assert.True(blindFraction < 0.15,
-            $"{blindFraction:P0} des cueilleurs morts de faim en transit/récolte n'avaient aucun signal (ni BFS ni gradient) à leur dernier cycle de décision -- vraie cécité");
-    }
-
-    // Remplace l'ancien Population_OscillatesWithinBounds_NeverExtinct_
-    // NeverArrayLimited (s19) -- scindé en deux tests à responsabilité
-    // unique (session 19b/19c), sur un système dont le deadlock
-    // Eating/Harvest est désormais éliminé (session 19c).
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Population_NotArrayLimited(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        for (int i = 0; i < 2_000_000; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-        }
-
-        // Strict (pas juste <5% comme l'ancien test, cf. plan s19b point
-        // 3) : AgentCapacityMultiplier doit être assez haut pour que le
-        // TABLEAU ne soit jamais le facteur limitant pendant le calibrage
-        // -- une seule naissance refusée invalide la mesure.
-        Assert.True(world.BirthsTotal > 0, "aucune naissance sur 2M ticks -- rien à mesurer");
-        Assert.Equal(0, world.BirthsRefusedArrayFull);
-    }
-
-    [Theory]
-    [InlineData(42)]
-    [InlineData(7)]
-    public void Population_OscillationDoesNotDiverge(int seed)
-    {
-        var catalog = TestCatalogs.LoadTerrain();
-        var vegetation = TestCatalogs.LoadVegetation();
-        var species = TestCatalogs.LoadSpecies();
-        var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed, size: 512, catalog, vegetation, species, config);
-
-        const int totalTicks = 2_000_000;
-        const int thirdTicks = totalTicks / 3;
-        int firstThirdMaxPop = 0;
-        int lastThirdMaxPop = 0;
-
-        for (int i = 0; i < totalTicks; i++)
-        {
-            world.Tick(World.TickIntervalSeconds);
-
-            if (i < thirdTicks)
-            {
-                firstThirdMaxPop = Math.Max(firstThirdMaxPop, world.AliveCount);
-            }
-            else if (i >= totalTicks - thirdTicks)
-            {
-                lastThirdMaxPop = Math.Max(lastThirdMaxPop, world.AliveCount);
-            }
-        }
-
-        Assert.True(world.MinAliveCountEverObserved > 50,
-            $"creux minimum {world.MinAliveCountEverObserved} sur toute la durée -- risque d'extinction par effet Allee");
-
-        // Amplitude du dernier tiers du run ne dépasse pas notablement
-        // celle du premier tiers -- pas de spirale/divergence, une
-        // oscillation soutenue est le comportement voulu (Lotka-Volterra).
-        // Diagnostiqué comme réel (pas un artefact du deadlock Eating/
-        // Harvest) si ce test échoue encore après la session 19c -- cf.
-        // plan, point 5 (gain du frein clanPoolRatio).
-        Assert.True(lastThirdMaxPop < firstThirdMaxPop * 3,
-            $"pic du dernier tiers ({lastThirdMaxPop}) largement supérieur à celui du premier tiers ({firstThirdMaxPop}) -- amplitude divergente ?");
-    }
+    // StarvationDeaths_AreNotBlindDeaths, Population_NotArrayLimited et
+    // Population_OscillationDoesNotDiverge (2M ticks chacun) déplacés
+    // dans Tests/SlowTests.cs (session refactor) -- une classe dédiée
+    // par test longue durée pour que xUnit les exécute en parallèle
+    // entre elles plutôt qu'en série dans cette classe.
 
     [Fact]
     public void No_Eating_State_Exists()

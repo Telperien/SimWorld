@@ -22,19 +22,19 @@ internal static class TestCatalogs
         return File.ReadAllText(path);
     }
 
-    public static TerrainCatalog LoadTerrain()
+    public static Catalog<TerrainType> LoadTerrain()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "terrain.json");
         return TerrainCatalog.Load(ReadOrThrow(path));
     }
 
-    public static VegetationCatalog LoadVegetation()
+    public static Catalog<VegetationType> LoadVegetation()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "vegetation.json");
         return VegetationCatalog.Load(ReadOrThrow(path));
     }
 
-    public static SpeciesCatalog LoadSpecies()
+    public static Catalog<SpeciesType> LoadSpecies()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "data", "species.json");
         return SpeciesCatalog.Load(ReadOrThrow(path));
