@@ -1072,3 +1072,95 @@ de la carte sur un run long.
 - Grep `System.IO`/`Godot` dans `/Simulation` (`Home.cs` inclus) : rien.
 - `git status` : commit dédié à cette session (refactor committé
   séparément juste avant).
+
+## Session rendu — couleur agent = clan, diagnostic bande horizontale
+- Fait : `AgentRenderer.cs` teinte désormais les agents par `ClanId`
+  uniquement (retrait complet de `ColorForState`, qui affichait
+  systématiquement rouge un agent Idle chroniquement affamé et
+  masquait les clans). `data/palette.json` remplacé par 4 teintes
+  franches (teal/violet/or/azur) partagées avec `HomeRenderer`.
+- Diagnostiqué (pas corrigé, hors scope rendu) : la bande horizontale
+  vient de `VegetationSystem.SeedInitialVegetation` (balayage raster
+  bush-puis-arbre, déjà root-causé en s17b) -- corrigé la session
+  suivante (voir ci-dessous).
+- Cassé : rien de connu.
+- Prochaine fois : le fix de `SeedInitialVegetation` lui-même (fait
+  juste après, voir "Session fix ensemencement").
+
+## Session fix ensemencement — biais raster de la végétation initiale
+
+### Contexte
+`SeedInitialVegetation` semait en un seul balayage rotatif (ordre
+`y*Size+x`) : buissons jusqu'à saturation, puis arbres pour le reste.
+Comme la capacité arbre est bien plus petite, la portion "arbres
+seulement" tombait dans une plage contiguë de l'ordre de parcours --
+pas seulement cosmétique (la bande visible au rendu) mais un vrai
+biais spatial : la nourriture initiale dépendait de l'ORDRE DE
+BALAYAGE, pas du terrain. Un clan qui spawnait tard dans le balayage
+démarrait désavantagé indépendamment de sa géographie réelle -- même
+classe de défaut que le bug corrigé en s19 (`SeedMinimumBushPerPatch`),
+survécu ailleurs dans la même fonction.
+
+### Fix
+Remplace la rotation linéaire par une permutation complète des
+indices de tuile (Fisher-Yates, déterministe via `_rngVegetation`,
+même flux déjà utilisé dans ce fichier). Le corps de boucle (bush-
+puis-arbre, capacité) est inchangé -- seul l'ordre de visite change.
+En ordre mélangé, le sous-ensemble déjà visité au moment où la
+capacité buisson sature est épars sur toute la carte, donc la portion
+"arbres seulement" qui suit l'est aussi -- plus de bande possible par
+construction. `SeedMinimumBushPerPatch` non touchée (conservée telle
+quelle, elle ne souffrait pas de ce biais).
+
+### Test : `Vegetation_InitialSeeding_IsSpatiallyUniform`
+Nouveau test (`Tests/VegetationTests.cs`) : compare le ratio buisson/
+herbe et arbre/herbe sur 16 bandes horizontales à `t=0`. **Vérifié
+rouge sur le code d'avant** (bande à ratio 0,0005 contre une moyenne
+de 0,0883, écart relatif 99% -- preuve directe du biais), **vert
+après le fix**.
+
+### Effet de bord découvert : `Tick_AllocatesNothing_WithFireAndActiveAgents`
+Fragilité pré-existante exposée par le changement de disposition de
+la végétation : ce test met tous les pools de clan à 0 pour garder
+l'agent forcé en `Harvesting`, ce qui pousse AUSSI tous les agents
+ambiants à partir en recherche BFS (emptiness ~1 -> `BaseHarvestChance`
+~max) -- leur chemin dépend de la disposition réelle des buissons, et
+un chemin plus long que ce que la chauffe de 500 ticks avait
+pré-dimensionné fait grandir `_agentPaths[i]` PENDANT la fenêtre
+mesurée (136 octets alloués). Stabilisé : seul le pool du clan
+d'agent 0 reste à 0, les autres clans reçoivent un pool plein
+(`1_000_000`, même valeur que le pattern déjà utilisé dans
+`ClanTests.MakeFertileCouple`) pour qu'aucun agent ambiant ne
+cherche pendant la fenêtre mesurée. Pas un fix de simulation --
+uniquement une stabilisation de test.
+
+### Ligne verticale — vérification factuelle
+Argument analytique : l'ordre raster `y*Size+x` avance en X à
+l'intérieur d'une ligne Y avant d'incrémenter Y -- un point
+d'épuisement de capacité tombe toujours sur une frontière de LIGNE
+(horizontale), jamais de COLONNE. Le bug diagnostiqué ne pouvait
+mathématiquement pas produire de ligne verticale. Vérification
+empirique (`Tools/RenderDump`, PNG complet + recadrages `crop-band`/
+`crop-checker` + RLE de terrain à x=384) : **aucune ligne verticale
+visible**, ni dans le rendu ni dans les données de terrain brutes.
+Si elle est encore visible au F5 dans Godot, la cause serait
+spécifique au pipeline de rendu Godot lui-même (import de texture,
+filtrage), hors de portée de ce diagnostic offline -- à vérifier
+visuellement par l'utilisateur.
+
+### Observation post-fix (pas de recalibrage)
+`SimReport --seeds 42,7 --ticks 200000` : les 3 clans démarrent sur un
+pied comparable sur les deux seeds (pop 65-82, aucun clan en retard
+notable, `morts faim=0` partout). Horizon court (200k, pas 2M comme
+demandé explicitement de ne pas relancer) -- ne confirme PAS que
+l'effondrement du clan 0 observé sur 2M ticks la session précédente
+(`Clan_PoolNeverCollapsesToZero_InNormalConditions`, marqué Skip) est
+résolu, seulement que le biais de départ à `t=0` est éliminé. Aucun
+paramètre de `simulation.json` touché.
+
+### Vérification
+- `dotnet build` (5 projets) : tous verts.
+- `dotnet test --filter "Speed!=Slow"` : 56/56 verts.
+- Golden-hash : cassé (attendu, le monde initial change légitimement),
+  recalculé : `3617630654454750702`.
+- `git status` : commit dédié, permission avant push.

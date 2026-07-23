@@ -1,3 +1,4 @@
+using System.Linq;
 using Simulation;
 
 namespace Tests;
@@ -391,4 +392,76 @@ public class VegetationTests
             $"délai de repousse ({config.VegetationRegrowthDelayTicks} ticks) pas assez lent face au cycle de faim ({hungerSeekTicks} ticks)");
     }
 
+    [Fact]
+    public void Vegetation_InitialSeeding_IsSpatiallyUniform()
+    {
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
+        var world = new World(seed: 42, size: 512, catalog, vegetation, species, config);
+
+        catalog.TryGetId("grass", out byte grass);
+
+        const int bandCount = 16;
+        int bandHeight = world.Size / bandCount;
+        var grassPerBand = new int[bandCount];
+        var bushPerBand = new int[bandCount];
+        var treePerBand = new int[bandCount];
+
+        for (int y = 0; y < world.Size; y++)
+        {
+            int band = Math.Min(bandCount - 1, y / bandHeight);
+            for (int x = 0; x < world.Size; x++)
+            {
+                if (world.GetTerrainId(x, y) == grass)
+                {
+                    grassPerBand[band]++;
+                }
+            }
+        }
+
+        for (int i = 0; i < world.VegetationCount; i++)
+        {
+            Vegetation veg = world.GetVegetation(i);
+            int band = Math.Min(bandCount - 1, veg.Y / bandHeight);
+            if (i < world.BushCount)
+            {
+                bushPerBand[band]++;
+            }
+            else
+            {
+                treePerBand[band]++;
+            }
+        }
+
+        AssertSpatiallyUniform("buissons", bushPerBand, grassPerBand);
+        AssertSpatiallyUniform("arbres", treePerBand, grassPerBand);
+    }
+
+    // Écart relatif de chaque bande (bushCount/grassCount ou
+    // treeCount/grassCount) à la moyenne des bandes -- seuil de départ
+    // généreux (absorbe la variance naturelle du terrain Perlin),
+    // assez serré pour détecter une bande où le ratio s'effondre ou
+    // explose (signature du biais d'ordre de balayage, session fix
+    // ensemencement).
+    private static void AssertSpatiallyUniform(string label, int[] countPerBand, int[] grassPerBand)
+    {
+        var ratios = new List<double>();
+        for (int b = 0; b < countPerBand.Length; b++)
+        {
+            if (grassPerBand[b] > 0)
+            {
+                ratios.Add((double)countPerBand[b] / grassPerBand[b]);
+            }
+        }
+
+        double mean = ratios.Average();
+        foreach (double ratio in ratios)
+        {
+            double relativeDeviation = Math.Abs(ratio - mean) / mean;
+            Assert.True(relativeDeviation < 0.5,
+                $"{label} : bande avec ratio {ratio:F4} trop loin de la moyenne {mean:F4} (écart relatif {relativeDeviation:P0}) -- biais spatial d'ensemencement ?");
+        }
+    }
 }

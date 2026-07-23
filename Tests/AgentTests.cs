@@ -669,15 +669,25 @@ public class AgentTests
         world.SetTerrainId(bushX, bushY, grass);
         world.ForceSpawnVegetation(bushX, bushY, bushType, matureStage);
         world.SetVegetationFoodRemaining(bushX, bushY, 100_000);
-        // Pool à sec pour tout le monde : sans ça, HarvestTick repasse
-        // l'agent en Idle dès que le pool de son clan atteint sa cible,
-        // ce qui pourrait arriver avant la fin des 50 ticks mesurés.
-        for (int c = 0; c < world.ClanCount; c++)
-        {
-            world.SetClanFoodPool(c, 0);
-        }
         world.SetAgentTarget(0, bushX, bushY);
         world.SetAgentState(0, AgentState.Harvesting);
+
+        // Pool à sec pour le clan d'agent 0 SEULEMENT (sans ça,
+        // HarvestTick le repasse en Idle dès que le pool atteint sa
+        // cible) ; pool plein pour les AUTRES clans, pour qu'aucun
+        // agent ambiant ne parte en recherche (emptiness ~0 ->
+        // BaseHarvestChance ~0) pendant la fenêtre mesurée -- une
+        // recherche BFS ambiante emprunterait un chemin dépendant de
+        // la disposition réelle des buissons, pouvant faire grandir
+        // _agentPaths[i] au-delà de ce que la chauffe de 500 ticks a
+        // déjà pré-dimensionné (fragilité pré-existante, exposée par
+        // tout changement de disposition de la végétation -- session
+        // fix ensemencement).
+        uint targetClanId = world.GetAgent(0).ClanId;
+        for (int c = 0; c < world.ClanCount; c++)
+        {
+            world.SetClanFoodPool(c, world.GetClan(c).Id == targetClanId ? 0 : 1_000_000);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 50; i++)

@@ -184,23 +184,36 @@ public sealed class VegetationSystem
     // Même esprit que la génération de terrain elle-même (déjà
     // "complète" au démarrage, jamais générée par accrétion) :
     // pré-plante directement à maturité, jusqu'à la capacité de
-    // chaque tableau, via le même balayage tournant que la
-    // germination spontanée (déterministe, pas de biais spatial).
+    // chaque tableau.
+    //
+    // Ordre de balayage MÉLANGÉ (session fix ensemencement), pas une
+    // simple rotation linéaire : une rotation visite les tuiles en
+    // ordre raster (y*Size+x), donc la portion "buissons puis arbres
+    // pour le reste" tombe systématiquement dans une plage CONTIGUË de
+    // cet ordre (bande visible + biais spatial réel : la nourriture
+    // initiale dépendait de l'ordre de parcours, pas du terrain -- un
+    // clan qui spawnait tard dans le balayage démarrait désavantagé
+    // sans rapport avec sa géographie). Une permutation complète
+    // (Fisher-Yates, déterministe via _rngVegetation) rend le
+    // sous-ensemble déjà visité au moment où la capacité buisson
+    // sature ÉPARS sur toute la carte -- la portion "arbres seulement"
+    // qui suit est donc elle aussi éparse, plus de bande possible par
+    // construction. Le corps de boucle (bush-puis-arbre, capacité) est
+    // inchangé, seul l'ordre de visite change.
     private void SeedInitialVegetation()
     {
         int bushMatureStage = _vegetationCatalog.Get(_bushTypeId).MatureStage;
         int treeMatureStage = _vegetationCatalog.Get(_treeTypeId).MatureStage;
-        int tileCount = _terrainSystem.Terrain.Length;
-        int startIndex = (int)(_rngVegetation.NextDouble() * tileCount);
+        int[] order = BuildShuffledTileOrder();
 
-        for (int offset = 0; offset < tileCount; offset++)
+        for (int offset = 0; offset < order.Length; offset++)
         {
             if (BushCount >= _bushes.Length && TreeCount >= _trees.Length)
             {
                 return;
             }
 
-            int index = (startIndex + offset) % tileCount;
+            int index = order[offset];
             if (_terrainSystem.Terrain[index] != _terrainSystem.GrassId || _bushIndexAt[index] != -1 || _treeIndexAt[index] != -1)
             {
                 continue;
@@ -226,6 +239,29 @@ public sealed class VegetationSystem
                 _trees[TreeCount - 1].Stage = (byte)treeMatureStage;
             }
         }
+    }
+
+    // Permutation complète des indices de tuile (Fisher-Yates),
+    // déterministe via _rngVegetation -- même flux déjà utilisé dans ce
+    // fichier, aucun nouveau flux introduit. Coût O(size²) une fois à
+    // la construction, même ordre de grandeur que le flood-fill déjà
+    // présent dans SeedMinimumBushPerPatch (déjà accepté).
+    private int[] BuildShuffledTileOrder()
+    {
+        int tileCount = _size * _size;
+        var order = new int[tileCount];
+        for (int i = 0; i < tileCount; i++)
+        {
+            order[i] = i;
+        }
+
+        for (int i = tileCount - 1; i > 0; i--)
+        {
+            int j = (int)(_rngVegetation.NextDouble() * (i + 1));
+            (order[i], order[j]) = (order[j], order[i]);
+        }
+
+        return order;
     }
 
     private int ComputeDeathTick(VegetationType typeInfo, int tickCounter)
