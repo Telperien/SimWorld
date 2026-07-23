@@ -35,5 +35,6 @@
   "baseHarvestChance": 0.04,
   "targetFoodPoolPerCapita": 900.0,
   "referenceClanPopulation": 3000,
-  "allowStarvationDeath": false
+  "allowStarvationDeath": false,
+  "homeAnchorChance": 0.3
 }

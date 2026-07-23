@@ -120,6 +120,13 @@ public struct Agent
     // -- écrits uniquement, jamais lus par une décision, exclus de
     // Hash() comme le reste des compteurs de la section diagnostic.
     public uint TicksHarvesting;
+
+    // Foyer (session foyers) : JAMAIS de valeur "pas de foyer", même
+    // raisonnement que ClanId. Hérité de la mère à la naissance ; au
+    // spawn initial, celui du clan créé au même point que le centre de
+    // grappe. Influence le comportement (ancrage d'errance) -> inclus
+    // dans Hash().
+    public uint HomeId;
 }
 
 public static class SeekOutcome

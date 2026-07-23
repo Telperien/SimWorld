@@ -127,6 +127,26 @@ public static class SpriteGenerator
         return bmp;
     }
 
+    // Marqueur de foyer (session foyers) : un mât + une bannière, pour se
+    // distinguer visuellement d'un buisson (simple disque) tout en
+    // réutilisant les mêmes primitives. Position fixe (jamais animée),
+    // teinte dérivée de la palette du clan par l'appelant (Game).
+    public static SpriteBitmap GenerateHomeMarkerSprite(ulong seed, uint hueColor)
+    {
+        var rng = new Rng(seed);
+        var bmp = new SpriteBitmap(8, 10);
+        uint poleColor = TrunkColor;
+
+        int poleX = 3;
+        DrawRect(bmp, poleX, 3, 1, 7, poleColor);
+
+        int flagRadius = 3;
+        int jitterX = (int)(rng.NextDouble() * 2);
+        DrawDiscNoisy(bmp, poleX + 1 + jitterX, flagRadius, flagRadius, hueColor, rng);
+
+        return bmp;
+    }
+
     private static void DrawRect(SpriteBitmap bmp, int x0, int y0, int w, int h, uint color)
     {
         for (int y = 0; y < h; y++)

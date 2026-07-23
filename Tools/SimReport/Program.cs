@@ -572,6 +572,28 @@ for (int c = 0; c < world.ClanCount; c++)
 }
 Console.WriteLine($"  Total : recolte cumulee={totalHarvested} consommee cumulee={totalConsumed}");
 
+// --- Foyers (session foyers) ---
+Console.WriteLine();
+Console.WriteLine("--- Foyers (session foyers) ---");
+int[] nearHomePopulation = new int[world.ClanCount];
+for (int i = 0; i < world.AliveCount; i++)
+{
+    Agent agent = world.GetAgent(i);
+    Home agentHome = world.GetHomeById(agent.HomeId);
+    double dx = agent.X - (agentHome.X + 0.5);
+    double dy = agent.Y - (agentHome.Y + 0.5);
+    if (dx * dx + dy * dy <= (double)config.MateSearchRadius * config.MateSearchRadius)
+    {
+        nearHomePopulation[agent.ClanId]++;
+    }
+}
+for (int c = 0; c < world.HomeCount; c++)
+{
+    Home home = world.GetHome(c);
+    Console.WriteLine($"  Foyer clan {c} : position=({home.X},{home.Y})  pop dans rayon {config.MateSearchRadius}={nearHomePopulation[c],5}/{clanPopulation[c],5}");
+}
+Console.WriteLine($"  Distance moyenne agent->foyer de son clan : {world.AverageDistanceToHome(),8:F2}");
+
 // Histogrammes des ages a 4 instants choisis APRES COUP sur la courbe
 // de population deja collectee (session 14b, diagnostic boom-bust) :
 // baseline (premier echantillon), pic (argmax pop), creux suivant le

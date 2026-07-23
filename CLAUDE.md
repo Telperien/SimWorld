@@ -125,6 +125,17 @@ territoire. Un clan = une race. Un agent a toujours un clan. Récolter
 sont deux actions distinctes. Pas de reproduction inter-clans.
 ParentClanId posé dès la création, même sans scissions.
 
+## Social
+Le foyer est un point d'ancrage par clan (position fixe, un par clan).
+C'est une TENDANCE comportementale (nudge probabiliste dans l'errance
+de secours), jamais une contrainte dure ni un état FSM : il ne bloque,
+ne redirige et n'interrompt aucune action physique (récolte, recherche
+BFS, suivi de gradient). Un besoin ou un ancrage ne devient jamais une
+condition de sortie d'un état FSM — même principe que la règle IA sur
+la faim (s19c) : tout mécanisme qui pourrait un jour verrouiller un
+agent en attente d'une ressource ou d'une position externe est un
+deadlock en puissance.
+
 ## Récolte — réservation de cible
 - Un agent qui cible un buisson/gisement pour récolte le RÉSERVE :
   un autre agent en recherche ne doit pas converger vers la même

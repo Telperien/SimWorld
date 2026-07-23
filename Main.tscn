@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/WorldRenderer.cs" id="1"]
 [ext_resource type="Script" path="res://scripts/CameraController.cs" id="2"]
 [ext_resource type="Script" path="res://scripts/AgentRenderer.cs" id="3"]
 [ext_resource type="Script" path="res://scripts/VegetationRenderer.cs" id="4"]
 [ext_resource type="Script" path="res://scripts/ClanHud.cs" id="5"]
+[ext_resource type="Script" path="res://scripts/HomeRenderer.cs" id="6"]
 
 [node name="Main" type="Node2D"]
 
@@ -17,6 +18,9 @@ script = ExtResource("4")
 
 [node name="AgentsMultiMesh" type="MultiMeshInstance2D" parent="."]
 script = ExtResource("3")
+
+[node name="HomeMarkers" type="Node2D" parent="."]
+script = ExtResource("6")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(256, 256)

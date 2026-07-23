@@ -115,6 +115,16 @@ public sealed class World
 
     public int GetClanMinAliveEverObserved(int index) => _agentClanSystem.ClanMinAliveEverObserved[index];
 
+    // Foyers (session foyers) : même raisonnement de sûreté d'itération
+    // externe que les clans ci-dessus (capacité fixe, jamais compactée).
+    public int HomeCount => _agentClanSystem.HomeCount;
+
+    public Home GetHome(int index) => _agentClanSystem.GetHome(index);
+
+    public Home GetHomeById(uint id) => _agentClanSystem.GetHomeById(id);
+
+    public double AverageDistanceToHome() => _agentClanSystem.AverageDistanceToHome();
+
     public static IReadOnlyList<double> DeathDistanceBucketUpperBounds => AgentClanSystem.DeathDistanceBucketUpperBounds;
 
     public int[] GetDeathDistanceHistogram() => (int[])_agentClanSystem.DeathDistanceHistogram.Clone();
@@ -437,6 +447,7 @@ public sealed class World
             Mix(ref hash, agent.PregnantUntil);
             Mix(ref hash, agent.PendingFatherId);
             Mix(ref hash, agent.ClanId);
+            Mix(ref hash, agent.HomeId);
 
             List<int> path = _agentClanSystem.AgentPaths[i];
             Mix(ref hash, (ulong)path.Count);
@@ -481,6 +492,18 @@ public sealed class World
             Mix(ref hash, unchecked((uint)clan.ParentClanId));
             Mix(ref hash, clan.Species);
             Mix(ref hash, unchecked((uint)clan.FoodPool));
+        }
+
+        // Foyers (session foyers) : capacité fixe, jamais compactée,
+        // même raisonnement que le bloc Clan ci-dessus.
+        Mix(ref hash, (ulong)_agentClanSystem.Homes.Length);
+        for (int i = 0; i < _agentClanSystem.Homes.Length; i++)
+        {
+            ref Home home = ref _agentClanSystem.Homes[i];
+            Mix(ref hash, home.Id);
+            Mix(ref hash, home.ClanId);
+            Mix(ref hash, (uint)home.X);
+            Mix(ref hash, (uint)home.Y);
         }
 
         // Champ de gradient de nourriture (session 14c) : dérivé

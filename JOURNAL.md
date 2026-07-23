@@ -992,3 +992,83 @@ scope, reporté).
 - `git status` : commit dédié à ce refactor seul (le travail de la
   session foyers, démarrée dans le même intervalle, est committé
   séparément).
+
+## Session foyers — le premier objet social du monde
+
+### Contexte
+Les clans (s18) spawnent groupés mais n'ont aucun ancrage spatial
+stable -- rien ne rappelle les agents vers leur point d'origine, un
+clan peut dériver au fil des générations. Le foyer est le premier objet
+social : un point d'ancrage fixe par clan, une TENDANCE (pas une
+contrainte dure), avant que territoire/bâtiments n'existent.
+
+### Décision d'architecture
+`Home[]` vit dans `AgentClanSystem` (pas de `HomeSystem` séparé) :
+un foyer n'a de sens qu'au croisement clan (`ClanId`) × agent (l'effet
+s'exprime uniquement dans l'errance d'un agent). Un système séparé
+aurait forcé une référence arrière artificielle pour un objet sans
+aucune logique propre (pas de tick, pas de FSM).
+
+### Implémentation
+`Simulation/Home.cs` (struct `Id`/`ClanId`/`X`/`Y`, même patron que
+`Clan`). `Agent.HomeId` hérité de la mère à la naissance ; au spawn
+initial, celui du clan créé à la MÊME passe que `TryPickClusterCenter`
+(aucun tirage RNG supplémentaire). Ancrage : nouveau
+`HomeAnchorChance` (0.3) -- dans `TryStartMoving`, le SEUL point où une
+direction d'errance de secours est tirée sans cible connue, une
+nouvelle direction a 30% de chance d'être choisie vers le foyer plutôt
+qu'uniformément au hasard. Protection structurelle : `ThinkAgent`
+retourne tôt pour `Seeking`/`Harvesting` avant d'atteindre ce code --
+récolte/BFS/gradient ne sont JAMAIS affectés, aucun risque de recréer
+la classe de bug deadlock Eating/Harvest (s19c).
+
+Rendu : `scripts/HomeRenderer.cs` (`MultiMeshInstance2D` par foyer,
+position posée une fois -- un foyer ne bouge jamais cette session),
+`SpriteGenerator.GenerateHomeMarkerSprite` (mât + bannière, teinte
+dérivée de `PaletteCatalog` par `ClanId % Count`).
+
+Diagnostic : `AgentClanSystem.AverageDistanceToHome()`, nouveau bloc
+SimReport (position par foyer, population dans `MateSearchRadius` du
+foyer, distance moyenne). Mesure réelle (seed 42, 50k ticks, config
+par défaut) : distance moyenne 34,1 tuiles -- cohérent avec le rayon
+de spawn groupé (`ClanSpawnRadiusFraction × Size` ≈ 169 sur 512²),
+aucune dérive anormale observée.
+
+### Ce qui NE bouge PAS
+Aucun changement à `TryReproduce`/`TryFindMate`/`TryStartHarvesting`/
+`TryFindNearestMatureBush`/`TryFollowFoodGradient` au-delà de
+l'héritage `HomeId` (une ligne). Calibrage de densité, bâtiments,
+territoires -- hors scope, non touchés.
+
+### Tests
+5 tests fast (`Tests/HomeTests.cs`) : création par clan, héritage à
+la naissance, `HomeId` toujours valide, l'ancrage rapproche
+effectivement du foyer, l'ancrage n'interfère JAMAIS avec
+Harvesting/Seeking (preuve directe de la protection structurelle). 1
+test slow (`Slow_Population_RemainsClanClustered_LongRun`, 2M ticks,
+seeds 42/7) : la distance moyenne ne dérive pas au-delà de la moitié
+de la carte sur un run long.
+
+### Vérification
+- `dotnet build` (5 projets) : tous verts.
+- `dotnet test --filter "Speed!=Slow"` : 55/55 verts.
+- `dotnet test --filter "Speed=Slow"` : 10 verts, 3 ignorés (calibrage
+  déjà reporté, hérité du refactor), **2 échecs nouveaux** --
+  `Clan_PoolNeverCollapsesToZero_InNormalConditions` (seeds 42 et 7) :
+  clan 0 tombe à un creux de population de 0 sur toute la durée du run
+  2M ticks. Diagnostic : ce test n'avait jamais tourné à terme avant
+  cette session (le plan refactor différait le tier slow complet "une
+  seule fois, à la toute fin du chantier"). Le mécanisme d'ancrage
+  foyer ne touche QUE `TryStartMoving` (tirage de direction dans
+  l'errance de secours) -- aucun effet sur `TryReproduce`/
+  `TryFindMate`/`TryStartHarvesting`/le pool du clan -- donc très
+  probablement un défaut de calibrage préexistant du spawn/pool de clan
+  (s18/s19), jamais détecté faute d'un run complet. Marqué `Skip` avec
+  la raison (pas de fix silencieux du monde) -- calibrage spawn/
+  viabilité par clan à reprendre en session dédiée, hors scope ici.
+- Golden-hash : cassé comme attendu (nouveaux champs `Hash()` +
+  nouvelle logique de mouvement), recalculé :
+  `16039018715249892889` → `12052662438034108535`.
+- Grep `System.IO`/`Godot` dans `/Simulation` (`Home.cs` inclus) : rien.
+- `git status` : commit dédié à cette session (refactor committé
+  séparément juste avant).

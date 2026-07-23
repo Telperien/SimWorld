@@ -58,6 +58,13 @@ public sealed record SimulationConfig
     // "famine", race spécifique) -- ne jamais l'activer silencieusement.
     public required bool AllowStarvationDeath { get; init; }
 
+    // Foyers (session foyers) : probabilité qu'un agent qui tire une
+    // NOUVELLE direction d'errance de secours (TryStartMoving, aucune
+    // cible connue) la choisisse vers son foyer plutôt qu'uniformément
+    // au hasard. Une tendance, pas une contrainte -- cf. CLAUDE.md,
+    // section Social.
+    public required double HomeAnchorChance { get; init; }
+
     public static SimulationConfig Load(string json)
     {
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };

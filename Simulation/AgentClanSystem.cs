@@ -33,6 +33,12 @@ public sealed class AgentClanSystem
     private readonly int[] _clanIndexById;
     private uint _nextClanId;
 
+    // Foyers (session foyers) : un par clan, même patron de capacité
+    // fixe + indirection par Id stable que Clan[] ci-dessus.
+    private readonly Home[] _homes;
+    private readonly int[] _homeIndexById;
+    private uint _nextHomeId;
+
     // Diagnostic par clan : exclus de Hash() sauf FoodPool/ClanId
     // (déjà couverts via le bloc clan et le bloc agent).
     private readonly int[] _clanHungerDeaths;
@@ -124,6 +130,14 @@ public sealed class AgentClanSystem
     public long MealsEaten { get; set; }
 
     public int ClanCount => _clans.Length;
+
+    public Home[] Homes => _homes;
+
+    public int[] HomeIndexById => _homeIndexById;
+
+    public int HomeCount => _homes.Length;
+
+    public uint NextHomeId { get => _nextHomeId; set => _nextHomeId = value; }
 
     public uint NextAgentId { get => _nextAgentId; set => _nextAgentId = value; }
 
@@ -246,6 +260,22 @@ public sealed class AgentClanSystem
         Array.Fill(_clanMinAliveEverObserved, int.MaxValue);
         _clanPopulation = new int[_clans.Length];
 
+        // Un foyer par clan (capacité fixe, même raisonnement que
+        // _clans ci-dessus). Id/ClanId assignés ICI, inconditionnellement
+        // (comme CreateClans) -- l'identité _homeIndexById[i]==i doit
+        // tenir même si un clan échoue à trouver un centre de grappe
+        // (SpawnAgents ci-dessous ne fait alors que remplir X/Y, jamais
+        // sauter la création elle-même). Position (X, Y) posée à la
+        // même passe que le centre de grappe du clan dans SpawnAgents --
+        // pas de second tirage RNG.
+        _homes = new Home[_clans.Length];
+        _homeIndexById = new int[_clans.Length];
+        for (int i = 0; i < _homes.Length; i++)
+        {
+            _homes[i] = new Home { Id = _nextHomeId++, ClanId = _clans[i].Id, X = 0, Y = 0 };
+            _homeIndexById[i] = i;
+        }
+
         SpawnAgents(initialPopulation);
     }
 
@@ -274,6 +304,36 @@ public sealed class AgentClanSystem
 
     public ref Clan GetClanById(uint id) => ref _clans[ClanIndex(id)];
 
+    public int HomeIndex(uint id) => _homeIndexById[id];
+
+    public ref Home GetHomeById(uint id) => ref _homes[HomeIndex(id)];
+
+    public Home GetHome(int index) => _homes[index];
+
+    // Diagnostic (session foyers) : distance euclidienne moyenne entre
+    // chaque agent vivant et le foyer de son clan -- mesure la
+    // clusterisation réelle produite par l'ancrage, jamais lue par une
+    // décision. Lecture pure, exclue de Hash() (même statut que
+    // AgentDensityStdDev/DistanceToNearestMatureBush).
+    public double AverageDistanceToHome()
+    {
+        if (AliveCount == 0)
+        {
+            return 0.0;
+        }
+
+        double sum = 0.0;
+        for (int i = 0; i < AliveCount; i++)
+        {
+            ref Agent agent = ref _agents[i];
+            Home home = GetHomeById(agent.HomeId);
+            double dx = agent.X - (home.X + 0.5);
+            double dy = agent.Y - (home.Y + 0.5);
+            sum += Math.Sqrt(dx * dx + dy * dy);
+        }
+        return sum / AliveCount;
+    }
+
     private void SpawnAgents(int count)
     {
         int clanCount = _clans.Length;
@@ -290,6 +350,14 @@ public sealed class AgentClanSystem
             {
                 continue;
             }
+
+            // Position du foyer du clan : même point que le centre de
+            // grappe utilisé pour le spawn groupé ci-dessus, aucun
+            // tirage RNG supplémentaire. Id/ClanId déjà posés au
+            // constructeur (identité de _homeIndexById préservée même
+            // si ce clan échoue à trouver un centre).
+            _homes[c].X = centerX;
+            _homes[c].Y = centerY;
 
             SpeciesType species = _speciesCatalog.Get(_clans[c].Species);
             int clanSpawned = 0;
@@ -329,6 +397,7 @@ public sealed class AgentClanSystem
                     State = AgentState.Idle,
                     Species = _clans[c].Species,
                     ClanId = _clans[c].Id,
+                    HomeId = _homes[c].Id,
                     // Étalée sur [0, HungerSeekThreshold) -- même
                     // raisonnement que l'âge de départ étalé ci-dessous
                     // (s11/s14) : Hunger=0 pour tout le monde ferait
@@ -559,7 +628,30 @@ public sealed class AgentClanSystem
         }
         else
         {
-            direction = (int)(_rngAgents.NextUInt64() >> 62);
+            // Ancrage foyer (session foyers) : une nouvelle direction a
+            // une chance HomeAnchorChance d'être choisie vers le foyer
+            // plutôt qu'uniformément au hasard -- une TENDANCE, jamais
+            // une contrainte : ce tirage ne touche que la marche
+            // d'errance de secours (aucun effet sur Seeking/Harvesting,
+            // cf. CLAUDE.md section Social). Si l'agent est déjà sur la
+            // tuile de son foyer (dx=dy=0), rien à biaiser -- retombe
+            // sur le tirage uniforme.
+            if (agent.HomeId != Home.NoHome && _rngAgents.NextDouble() < _config.HomeAnchorChance)
+            {
+                Home home = GetHomeById(agent.HomeId);
+                int dxHome = home.X - currentX;
+                int dyHome = home.Y - currentY;
+                direction = dxHome == 0 && dyHome == 0
+                    ? (int)(_rngAgents.NextUInt64() >> 62)
+                    : Math.Abs(dxHome) >= Math.Abs(dyHome)
+                        ? (dxHome < 0 ? 0 : 1)
+                        : (dyHome < 0 ? 2 : 3);
+            }
+            else
+            {
+                direction = (int)(_rngAgents.NextUInt64() >> 62);
+            }
+
             agent.WanderDirection = (byte)direction;
             agent.WanderTicksRemaining = _config.WanderPersistenceTicks;
         }
@@ -980,6 +1072,9 @@ public sealed class AgentClanSystem
             // Hérité de la mère (session 18) : un enfant naît dans le
             // clan de ses parents, jamais sans clan.
             ClanId = mother.ClanId,
+            // Hérité de la mère (session foyers), même raisonnement que
+            // ClanId ci-dessus.
+            HomeId = mother.HomeId,
             Hunger = 0,
             Facing = 0,
             SeekCooldown = 0,
