@@ -1,7 +1,6 @@
 {
-  "clay":    { "id": 0, "color": "#c47a4f" },
-  "sand":    { "id": 1, "color": "#d9b673" },
-  "ash":     { "id": 2, "color": "#8f8577" },
-  "moss":    { "id": 3, "color": "#7a9463" },
-  "clay-dark": { "id": 4, "color": "#8f5a3a" }
+  "teal":   { "id": 0, "color": "#17A398" },
+  "violet": { "id": 1, "color": "#7B2FBE" },
+  "gold":   { "id": 2, "color": "#D9A404" },
+  "azure":  { "id": 3, "color": "#1E6FEB" }
 }
