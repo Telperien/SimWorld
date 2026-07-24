@@ -24,7 +24,8 @@ public class ReproductionTests
     private static (World world, uint motherId, uint fatherId) MakeFertileCouple(
         Catalog<TerrainType> catalog, Catalog<VegetationType> vegetation, Catalog<SpeciesType> species, SimulationConfig config, int seed)
     {
-        var world = new World(seed, size: 128, catalog, vegetation, species, config);
+        var buildings = TestCatalogs.LoadBuildings();
+        var world = new World(seed, size: 128, catalog, vegetation, species, buildings, config);
 
         // SeedInitialVegetation (s15) plante un monde déjà établi à la
         // construction -- sans ce clear, la population ambiante trouve

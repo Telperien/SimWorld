@@ -1,0 +1,5 @@
+{
+  "hut":   { "id": 0, "tier": 0, "popThreshold": 0,  "sprite": "hut",   "cost": { "wood": 0, "stone": 0 }, "material": "wood",  "provides": [] },
+  "house": { "id": 1, "tier": 1, "popThreshold": 6,  "sprite": "house", "cost": { "wood": 0, "stone": 0 }, "material": "wood",  "provides": [] },
+  "tower": { "id": 2, "tier": 2, "popThreshold": 18, "sprite": "tower", "cost": { "wood": 0, "stone": 0 }, "material": "stone", "provides": [] }
+}

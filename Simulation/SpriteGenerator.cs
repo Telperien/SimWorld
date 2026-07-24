@@ -189,6 +189,154 @@ public static class SpriteGenerator
         }
     }
 
+    // Bâtiment (session bâtiments) : base + toit, plus haut et plus
+    // complexe à chaque tier. Teinte par clan. Le seed dérive de la
+    // position du bâtiment (stable tant qu'il ne bouge pas).
+    // Dimensions : tier 0 = 12×16, tier 1 = 16×20, tier 2 = 18×24.
+    public static SpriteBitmap GenerateBuildingSprite(ulong seed, byte tier, uint hueColor)
+    {
+        var rng = new Rng(seed);
+        (int w, int h) = tier switch
+        {
+            0 => (12, 16),
+            1 => (16, 20),
+            _ => (18, 24),
+        };
+
+        var bmp = new SpriteBitmap(w, h);
+
+        uint wallColor = hueColor;
+        uint roofColor = Darken(hueColor, 0.65);
+        uint accentColor = Darken(hueColor, 0.45);
+
+        switch (tier)
+        {
+            case 0: // Hutte : base rectangulaire simple + toit triangulaire
+                DrawBuildingHut(bmp, w, h, wallColor, roofColor, accentColor, rng);
+                break;
+            case 1: // Maison : base plus large + toit en pente + fenêtre
+                DrawBuildingHouse(bmp, w, h, wallColor, roofColor, accentColor, rng);
+                break;
+            default: // Tour : structure haute + créneaux + porte
+                DrawBuildingTower(bmp, w, h, wallColor, roofColor, accentColor, rng);
+                break;
+        }
+
+        return bmp;
+    }
+
+    private static void DrawBuildingHut(SpriteBitmap bmp, int w, int h, uint wall, uint roof, uint accent, Rng rng)
+    {
+        // Murs : rectangle 8×8 centré en bas.
+        int wallW = 8;
+        int wallH = 8;
+        int wallX = (w - wallW) / 2;
+        int wallY = h - wallH;
+        DrawRect(bmp, wallX, wallY, wallW, wallH, wall);
+
+        // Toit triangulaire : lignes horizontales de largeur décroissante.
+        int roofBaseY = wallY;
+        for (int row = 0; row < 8; row++)
+        {
+            int roofWidth = wallW - row * 2;
+            if (roofWidth <= 0)
+            {
+                break;
+            }
+
+            int rx = (w - roofWidth) / 2;
+            int ry = roofBaseY - 8 + row;
+            DrawRect(bmp, rx, ry, roofWidth, 1, roof);
+        }
+
+        // Porte : 2×3 en bas au centre.
+        int doorX = w / 2 - 1;
+        int doorY = h - 3;
+        DrawRect(bmp, doorX, doorY, 2, 3, accent);
+    }
+
+    private static void DrawBuildingHouse(SpriteBitmap bmp, int w, int h, uint wall, uint roof, uint accent, Rng rng)
+    {
+        // Murs : rectangle 12×10 centré en bas.
+        int wallW = 12;
+        int wallH = 10;
+        int wallX = (w - wallW) / 2;
+        int wallY = h - wallH;
+        DrawRect(bmp, wallX, wallY, wallW, wallH, wall);
+
+        // Toit en pente (trapèze).
+        int roofBaseY = wallY;
+        for (int row = 0; row < 10; row++)
+        {
+            int roofWidth = wallW + 2 - row * 2;
+            if (roofWidth <= 0)
+            {
+                break;
+            }
+
+            int rx = (w - roofWidth) / 2;
+            int ry = roofBaseY - 10 + row;
+            DrawRect(bmp, rx, ry, roofWidth, 1, roof);
+        }
+
+        // Porte : 2×4 centrée en bas.
+        int doorX = w / 2 - 1;
+        int doorY = h - 4;
+        DrawRect(bmp, doorX, doorY, 2, 4, accent);
+
+        // Fenêtre : 2×2 en haut à gauche du mur.
+        int winX = wallX + 2;
+        int winY = wallY + 2;
+        DrawRect(bmp, winX, winY, 2, 2, accent);
+
+        // Deuxième fenêtre à droite.
+        int win2X = wallX + wallW - 4;
+        DrawRect(bmp, win2X, winY, 2, 2, accent);
+    }
+
+    private static void DrawBuildingTower(SpriteBitmap bmp, int w, int h, uint wall, uint roof, uint accent, Rng rng)
+    {
+        // Murs : rectangle 12×14 centré en bas.
+        int wallW = 12;
+        int wallH = 14;
+        int wallX = (w - wallW) / 2;
+        int wallY = h - wallH;
+        DrawRect(bmp, wallX, wallY, wallW, wallH, wall);
+
+        // Créneaux : 3 créneaux au sommet.
+        int crenY = wallY;
+        for (int c = 0; c < 3; c++)
+        {
+            int cx = wallX + 1 + c * 4;
+            DrawRect(bmp, cx, crenY - 2, 2, 2, wall);
+        }
+
+        // Toit pointu au-dessus des créneaux.
+        int spireY = crenY - 2;
+        for (int row = 0; row < 6; row++)
+        {
+            int spireWidth = 6 - row;
+            if (spireWidth <= 0)
+            {
+                break;
+            }
+
+            int sx = (w - spireWidth) / 2;
+            int sy = spireY - 6 + row;
+            DrawRect(bmp, sx, sy, spireWidth, 1, roof);
+        }
+
+        // Porte : 2×5 centrée en bas.
+        int doorX = w / 2 - 1;
+        int doorY = h - 5;
+        DrawRect(bmp, doorX, doorY, 2, 5, accent);
+
+        // Fenêtre haute : 2×2.
+        int winX = w / 2 - 1;
+        int winY = wallY + 3;
+        DrawRect(bmp, winX, winY, 2, 2, accent);
+    }
+
     private static uint Darken(uint color, double factor)
     {
         int r = (int)(((color >> 16) & 0xFF) * factor);

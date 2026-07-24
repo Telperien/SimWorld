@@ -425,6 +425,16 @@ public sealed class VegetationSystem
 
     public void ForceSpawnVegetation(int x, int y, byte type, byte stage, int tickCounter)
     {
+        // Si la densité configurée pour ce type est nulle à cette taille
+        // de monde (ex. treeDensity 0.0004 × 16² = 0 → tableau vide),
+        // on ne peut rien forcer. Le monde n'a pas de capacité pour ce
+        // type de végétation.
+        if ((type == _bushTypeId && _bushes.Length == 0) ||
+            (type == _treeTypeId && _trees.Length == 0))
+        {
+            return;
+        }
+
         ClearVegetationAt(x, y, tickCounter);
 
         // "Force" doit garantir la place même si le tableau (capacité =

@@ -12,9 +12,10 @@ public class WorldTests
         var vegetation = TestCatalogs.LoadVegetation();
         var species = TestCatalogs.LoadSpecies();
         var config = TestCatalogs.LoadSimulation();
+        var buildings = TestCatalogs.LoadBuildings();
 
-        var a = new World(seed: 42, size: 64, catalog, vegetation, species, config);
-        var b = new World(seed: 42, size: 64, catalog, vegetation, species, config);
+        var a = new World(seed: 42, size: 64, catalog, vegetation, species, buildings, config);
+        var b = new World(seed: 42, size: 64, catalog, vegetation, species, buildings, config);
 
         Assert.Equal(a.Hash(), b.Hash());
     }
@@ -26,9 +27,10 @@ public class WorldTests
         var vegetation = TestCatalogs.LoadVegetation();
         var species = TestCatalogs.LoadSpecies();
         var config = TestCatalogs.LoadSimulation();
+        var buildings = TestCatalogs.LoadBuildings();
 
-        var a = new World(seed: 1, size: 64, catalog, vegetation, species, config);
-        var b = new World(seed: 2, size: 64, catalog, vegetation, species, config);
+        var a = new World(seed: 1, size: 64, catalog, vegetation, species, buildings, config);
+        var b = new World(seed: 2, size: 64, catalog, vegetation, species, buildings, config);
 
         Assert.NotEqual(a.Hash(), b.Hash());
     }
@@ -40,8 +42,9 @@ public class WorldTests
         var vegetation = TestCatalogs.LoadVegetation();
         var species = TestCatalogs.LoadSpecies();
         var config = TestCatalogs.LoadSimulation();
+        var buildings = TestCatalogs.LoadBuildings();
 
-        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation, species, config));
+        Assert.Throws<ArgumentException>(() => new World(seed: 1, size: 100, catalog, vegetation, species, buildings, config));
     }
 
     [Fact]

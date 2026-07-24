@@ -148,6 +148,12 @@ plus permissif que la ressource : un agent peut traverser du terrain
 neutre, seul le territoire d'un clan RIVAL lui est fermé — un
 confinement strict "mon clan uniquement" a été essayé puis abandonné
 (mesuré, pas supposé) : une région change de main à chaque tick
+
+Les bâtiments sont statiques, rattachés à un foyer, uniquement dans
+le territoire de leur clan. Ils montent en tier selon la population
+du foyer. Catalogue data-driven (buildings.json) avec les slots
+cost/material/provides prêts pour les matériaux à venir. Rendus
+dans la texture de la carte, pas en MultiMesh.
 territoire, sans mémoire, donc un agent debout sur une région qui
 vient de repasser neutre n'avait plus aucune case candidate valide et
 restait figé en permanence. La repousse spontanée de végétation est

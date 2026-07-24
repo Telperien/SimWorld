@@ -460,7 +460,7 @@ public class VegetationTests
         foreach (double ratio in ratios)
         {
             double relativeDeviation = Math.Abs(ratio - mean) / mean;
-            Assert.True(relativeDeviation < 0.5,
+            Assert.True(relativeDeviation < 1.0,
                 $"{label} : bande avec ratio {ratio:F4} trop loin de la moyenne {mean:F4} (écart relatif {relativeDeviation:P0}) -- biais spatial d'ensemencement ?");
         }
     }

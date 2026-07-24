@@ -132,6 +132,55 @@ public sealed class TerritorySystem
     // TerritoryClaimThreshold empiriquement (cf. SimReport).
     public double GetInfluence(int clanIndex, int x, int y) => _influenceCurrent[clanIndex * RegionCount + RegionIndex(x, y)];
 
+    // Interpolation bilinéaire de l'influence pour un lissage visuel
+    // des frontières (session territoire, 4e tentative) : la simulation
+    // garde sa grille binaire, le rendu interpole pour des contours
+    // organiques. Lecture pure, n'affecte pas Hash().
+    public uint GetInterpolatedRegionOwner(float regionX, float regionY)
+    {
+        int x0 = (int)regionX;
+        int y0 = (int)regionY;
+        if (x0 < 0 || y0 < 0 || x0 >= _regionGridWidth - 1 || y0 >= _regionGridHeight - 1)
+        {
+            int cx = Math.Clamp((int)regionX, 0, _regionGridWidth - 1);
+            int cy = Math.Clamp((int)regionY, 0, _regionGridHeight - 1);
+            return _regionOwner[cy * _regionGridWidth + cx];
+        }
+
+        int x1 = x0 + 1;
+        int y1 = y0 + 1;
+
+        float fx = regionX - x0;
+        float fy = regionY - y0;
+
+        int clanCount = _agentClanSystem.ClanCount;
+        int regionCount = RegionCount;
+
+        int bestClanIndex = -1;
+        double bestValue = _config.TerritoryClaimThreshold;
+
+        for (int c = 0; c < clanCount; c++)
+        {
+            int baseIdx = c * regionCount;
+            double v00 = _influenceCurrent[baseIdx + y0 * _regionGridWidth + x0];
+            double v10 = _influenceCurrent[baseIdx + y0 * _regionGridWidth + x1];
+            double v01 = _influenceCurrent[baseIdx + y1 * _regionGridWidth + x0];
+            double v11 = _influenceCurrent[baseIdx + y1 * _regionGridWidth + x1];
+
+            double v0 = v00 + (v10 - v00) * fx;
+            double v1 = v01 + (v11 - v01) * fx;
+            double v = v0 + (v1 - v0) * fy;
+
+            if (v > bestValue)
+            {
+                bestValue = v;
+                bestClanIndex = c;
+            }
+        }
+
+        return bestClanIndex >= 0 ? _agentClanSystem.Clans[bestClanIndex].Id : NoOwner;
+    }
+
     public int CountRegionsOwnedBy(uint clanId)
     {
         int count = 0;
@@ -156,6 +205,63 @@ public sealed class TerritorySystem
             }
         }
         return count;
+    }
+
+    // Diagnostic (session territoire, fragmentation) : compte les
+    // composantes connexes du territoire d'un clan (connexité 4 sur
+    // la grille de régions). Une seule composante = territoire
+    // contigu. Plusieurs dizaines = îlots éparpillés.
+    // Lecture pure, exclue de Hash() — allocation acceptée
+    // (jamais appelée depuis Tick).
+    public int CountConnectedComponentsForClan(uint clanId)
+    {
+        int regionCount = RegionCount;
+        var visited = new bool[regionCount];
+        int components = 0;
+
+        for (int startCell = 0; startCell < regionCount; startCell++)
+        {
+            if (visited[startCell] || _regionOwner[startCell] != clanId)
+            {
+                continue;
+            }
+
+            components++;
+
+            // Flood-fill (BFS) depuis startCell.
+            var queue = new System.Collections.Generic.Queue<int>();
+            queue.Enqueue(startCell);
+            visited[startCell] = true;
+
+            while (queue.Count > 0)
+            {
+                int cell = queue.Dequeue();
+                int cx = cell % _regionGridWidth;
+                int cy = cell / _regionGridWidth;
+
+                // 4 voisins.
+                TryEnqueueSameOwner(cx - 1, cy, clanId, visited, queue);
+                TryEnqueueSameOwner(cx + 1, cy, clanId, visited, queue);
+                TryEnqueueSameOwner(cx, cy - 1, clanId, visited, queue);
+                TryEnqueueSameOwner(cx, cy + 1, clanId, visited, queue);
+            }
+        }
+
+        return components;
+    }
+
+    private void TryEnqueueSameOwner(int cx, int cy, uint clanId, bool[] visited, System.Collections.Generic.Queue<int> queue)
+    {
+        if (cx < 0 || cx >= _regionGridWidth || cy < 0 || cy >= _regionGridHeight)
+        {
+            return;
+        }
+        int cell = cy * _regionGridWidth + cx;
+        if (!visited[cell] && _regionOwner[cell] == clanId)
+        {
+            visited[cell] = true;
+            queue.Enqueue(cell);
+        }
     }
 
     // Territoire initial (session territoire, ordre de génération) :
@@ -287,9 +393,14 @@ public sealed class TerritorySystem
         _influenceCurrent = current;
         _influenceNext = next;
 
-        // Une région appartient au clan à l'influence la plus forte,
-        // au-dessus du seuil de revendication -- égalité stricte ->
-        // premier clan trouvé (ordre 0..ClanCount-1, déterministe).
+        // Hystérésis territoriale (session territoire, rétention) :
+        // une région DÉJÀ possédée par un clan utilise le seuil de
+        // perte (plus bas) plutôt que le seuil d'acquisition. L'écart
+        // entre les deux crée une zone tampon qui empêche l'érosion
+        // par bruit de calcul -- une région ne repasse pas neutre
+        // juste parce que l'influence a légèrement baissé à ce tick.
+        // Pas de conquête cette session : une région possédée ne
+        // change pas de clan, même si un rival y a plus d'influence.
         for (int cell = 0; cell < regionCount; cell++)
         {
             if (!_regionClaimable[cell])
@@ -298,6 +409,21 @@ public sealed class TerritorySystem
                 continue;
             }
 
+            uint previousOwner = _regionOwner[cell];
+            if (previousOwner != NoOwner)
+            {
+                // Région déjà possédée : vérifier l'abandon.
+                int prevClanIndex = _agentClanSystem.ClanIndex(previousOwner);
+                double prevInfluence = current[prevClanIndex * regionCount + cell];
+                if (prevInfluence > _config.TerritoryLossThreshold)
+                {
+                    // Garder le propriétaire actuel -- pas de conquête.
+                    continue;
+                }
+                // Abandon : tombe dans l'attribution neutre ci-dessous.
+            }
+
+            // Région neutre (ou abandonnée) : attribution normale.
             int bestClanIndex = -1;
             double bestValue = _config.TerritoryClaimThreshold;
             for (int c = 0; c < clanCount; c++)

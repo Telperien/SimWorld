@@ -182,7 +182,8 @@ static void RunPopulationBenchmark(Catalog<TerrainType> terrainCatalog, Catalog<
         // ferait exploser la memoire du tableau Agent[] pour rien (le
         // benchmark ne teste pas la croissance de population).
         var config = baseConfig with { AgentDensity = density, AgentCapacityMultiplier = 3 };
-        var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, config);
+        var buildingCatalog = BuildingCatalog.Load(File.ReadAllText(Path.Combine("data", "buildings.json")));
+        var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, buildingCatalog, config);
 
         for (int i = 0; i < warmupTicks; i++)
         {
@@ -251,8 +252,9 @@ if (allowStarvationDeathOverride)
 vegetationCatalog.TryGetId("bush", out byte bushType);
 vegetationCatalog.TryGetId("tree", out byte treeType);
 
+var buildingCatalog = BuildingCatalog.Load(ReadJsonOrThrow(Path.Combine(basePath, "data", "buildings.json")));
 var overallStopwatch = Stopwatch.StartNew();
-var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, config);
+var world = new World(seed, size, terrainCatalog, vegetationCatalog, speciesCatalog, buildingCatalog, config);
 
 // Stimulus externe (comme un clic joueur) : Rng local au rapport, seede
 // sur --seed pour rester reproductible run-a-run, mais hors de World
@@ -282,6 +284,24 @@ static (int OutsideCount, int AliveCount) CountAgentsOutsideOwnTerritory(World w
         }
     }
     return (outsideCount, world.AliveCount);
+}
+
+static int CountClaimableRegions(World world)
+{
+    int count = 0;
+    for (int cy = 0; cy < world.RegionGridHeight; cy++)
+    {
+        for (int cx = 0; cx < world.RegionGridWidth; cx++)
+        {
+            int x = cx * world.RegionCellSize + world.RegionCellSize / 2;
+            int y = cy * world.RegionCellSize + world.RegionCellSize / 2;
+            if (world.IsRegionClaimableAt(x, y))
+            {
+                count++;
+            }
+        }
+    }
+    return count;
 }
 
 var (outsideAtStart, aliveAtStart) = CountAgentsOutsideOwnTerritory(world);
@@ -630,6 +650,16 @@ int neutralRegions = world.NeutralRegionCount();
 double largestShare = world.RegionCount > 0 ? (double)largestClanRegions / world.RegionCount : 0.0;
 Console.WriteLine($"  Regions neutres : {neutralRegions,5} / {world.RegionCount,5}");
 Console.WriteLine($"  Part du plus gros clan : {largestShare,6:P1}");
+Console.WriteLine($"  Regions revendicables (hors eau) : {CountClaimableRegions(world),5} / {world.RegionCount,5}");
+Console.WriteLine($"  Composantes connexes par clan :");
+for (int c = 0; c < world.ClanCount; c++)
+{
+    uint clanId = world.GetClan(c).Id;
+    int components = world.CountConnectedComponentsForClan(clanId);
+    int regions = world.CountRegionsOwnedBy(clanId);
+    double avg = components > 0 ? (double)regions / components : 0.0;
+    Console.WriteLine($"    Clan {c} : {components,5} composantes  (regions={regions,5}, regions/composante={avg,6:F1})");
+}
 
 var (outsideAtEnd, aliveAtEnd) = CountAgentsOutsideOwnTerritory(world);
 double outsideAtStartPct = aliveAtStart > 0 ? 100.0 * outsideAtStart / aliveAtStart : 0.0;

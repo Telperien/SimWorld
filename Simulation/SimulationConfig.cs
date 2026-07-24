@@ -102,6 +102,23 @@ public sealed record SimulationConfig
     // -- sous ce seuil, la région reste neutre.
     public required double TerritoryClaimThreshold { get; init; }
 
+    // Hystérésis territoriale (session territoire, rétention) : une
+    // région DÉJÀ possédée par un clan n'est abandonnée que si son
+    // influence tombe sous ce second seuil, plus bas que le seuil
+    // d'acquisition. L'écart entre les deux crée une zone tampon qui
+    // empêche l'érosion par bruit de calcul -- une région ne repasse
+    // pas neutre juste parce que l'influence a légèrement baissé à ce
+    // tick. L'abandon est légitime (clan parti), pas accidentel.
+    // Doit être < TerritoryClaimThreshold.
+    public required double TerritoryLossThreshold { get; init; }
+
+    // Bâtiments (session bâtiments)
+    public required int BuildingCapacityPerHome { get; init; }
+    public required int BuildingPopPerBuilding { get; init; }
+    public required int BuildingMaxPerHome { get; init; }
+    public required int BuildingPlacementRadius { get; init; }
+    public required int BuildingBuildCooldownTicks { get; init; }
+
     public static SimulationConfig Load(string json)
     {
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };

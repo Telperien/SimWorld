@@ -11,8 +11,9 @@ public class DeterminismTests
         var catalog = TestCatalogs.LoadTerrain();
         var vegetation = TestCatalogs.LoadVegetation();
         var species = TestCatalogs.LoadSpecies();
+        var buildings = TestCatalogs.LoadBuildings();
         var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed: 30, size: 64, catalog, vegetation, species, config);
+        var world = new World(seed: 30, size: 64, catalog, vegetation, species, buildings, config);
 
         int trackedIndex = world.AliveCount - 1;
         uint trackedId = world.GetAgent(trackedIndex).Id;
@@ -58,8 +59,9 @@ public class DeterminismTests
         var catalog = TestCatalogs.LoadTerrain();
         var vegetation = TestCatalogs.LoadVegetation();
         var species = TestCatalogs.LoadSpecies();
+        var buildings = TestCatalogs.LoadBuildings();
         var config = TestCatalogs.LoadSimulation();
-        var world = new World(seed: 12345, size: 128, catalog, vegetation, species, config);
+        var world = new World(seed: 12345, size: 128, catalog, vegetation, species, buildings, config);
 
         world.Execute(new SpawnFire(64, 64, radius: 3));
 
@@ -68,6 +70,6 @@ public class DeterminismTests
             world.Tick(World.TickIntervalSeconds);
         }
 
-        Assert.Equal(9930508189263871011UL, world.Hash());
+        Assert.Equal(13502697128949866843UL, world.Hash());
     }
 }

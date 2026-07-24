@@ -45,4 +45,10 @@ internal static class TestCatalogs
         string path = Path.Combine(AppContext.BaseDirectory, "data", "simulation.json");
         return SimulationConfig.Load(ReadOrThrow(path));
     }
+
+    public static Catalog<BuildingType> LoadBuildings()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "data", "buildings.json");
+        return BuildingCatalog.Load(ReadOrThrow(path));
+    }
 }

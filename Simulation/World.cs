@@ -22,6 +22,7 @@ public sealed class World
     private const ulong FireStreamId = 2;
     private const ulong AgentsStreamId = 3;
     private const ulong VegetationStreamId = 4;
+    private const ulong BuildingsStreamId = 5;
 
     private readonly SimulationConfig _config;
     private readonly TerrainSystem _terrainSystem;
@@ -29,13 +30,16 @@ public sealed class World
     private readonly FireSystem _fireSystem;
     private readonly AgentClanSystem _agentClanSystem;
     private readonly TerritorySystem _territorySystem;
+    private readonly BuildingSystem _buildingSystem;
     private readonly Catalog<TerrainType> _catalog;
     private readonly Catalog<VegetationType> _vegetationCatalog;
     private readonly Catalog<SpeciesType> _speciesCatalog;
+    private readonly Catalog<BuildingType> _buildingCatalog;
     private readonly Rng _rngWorldGen;
     private readonly Rng _rngFire;
     private readonly Rng _rngAgents;
     private readonly Rng _rngVegetation;
+    private readonly Rng _rngBuildings;
     private readonly byte _bushTypeId;
     private readonly byte _treeTypeId;
     private int _tickCounter;
@@ -180,7 +184,11 @@ public sealed class World
         return deaths > 0 ? sum / (double)deaths : 0.0;
     }
 
+    // Convenience constructor: auto-loads a default building catalog.
     public World(int seed, int size, Catalog<TerrainType> catalog, Catalog<VegetationType> vegetationCatalog, Catalog<SpeciesType> speciesCatalog, SimulationConfig config)
+        : this(seed, size, catalog, vegetationCatalog, speciesCatalog, BuildingCatalog.Load("{\"hut\":{\"id\":0,\"tier\":0,\"popThreshold\":0,\"sprite\":\"hut\",\"cost\":{\"wood\":0,\"stone\":0},\"material\":\"wood\",\"provides\":[]},\"house\":{\"id\":1,\"tier\":1,\"popThreshold\":6,\"sprite\":\"house\",\"cost\":{\"wood\":0,\"stone\":0},\"material\":\"wood\",\"provides\":[]},\"tower\":{\"id\":2,\"tier\":2,\"popThreshold\":18,\"sprite\":\"tower\",\"cost\":{\"wood\":0,\"stone\":0},\"material\":\"stone\",\"provides\":[]}}"), config) { }
+
+    public World(int seed, int size, Catalog<TerrainType> catalog, Catalog<VegetationType> vegetationCatalog, Catalog<SpeciesType> speciesCatalog, Catalog<BuildingType> buildingCatalog, SimulationConfig config)
     {
         if (size <= 0 || (size & (size - 1)) != 0)
         {
@@ -191,12 +199,14 @@ public sealed class World
         _catalog = catalog;
         _vegetationCatalog = vegetationCatalog;
         _speciesCatalog = speciesCatalog;
+        _buildingCatalog = buildingCatalog;
         _config = config;
 
         _rngWorldGen = new Rng(DeriveSeed(seed, WorldGenStreamId));
         _rngFire = new Rng(DeriveSeed(seed, FireStreamId));
         _rngAgents = new Rng(DeriveSeed(seed, AgentsStreamId));
         _rngVegetation = new Rng(DeriveSeed(seed, VegetationStreamId));
+        _rngBuildings = new Rng(DeriveSeed(seed, BuildingsStreamId));
 
         _terrainSystem = new TerrainSystem(size, catalog, config, _rngWorldGen);
 
@@ -224,6 +234,9 @@ public sealed class World
         _territorySystem = new TerritorySystem(size, config, catalog, _terrainSystem, _agentClanSystem);
         _territorySystem.SeedInitialTerritory(config.TerritoryInitialRadiusFraction);
         _agentClanSystem.AttachTerritorySystem(_territorySystem);
+
+        _buildingSystem = new BuildingSystem(size, config, catalog, buildingCatalog, _terrainSystem, _territorySystem, _agentClanSystem, _rngBuildings);
+
         _agentClanSystem.SpawnInitialAgents();
     }
 
@@ -236,6 +249,12 @@ public sealed class World
     public Agent GetAgent(int index) => _agentClanSystem.Agents[index];
 
     public Vegetation GetVegetation(int index) => _vegetationSystem.GetVegetation(index);
+
+    // Bâtiments (session bâtiments)
+    public int BuildingCount => _buildingSystem.Count;
+    public Building GetBuilding(int index) => _buildingSystem.Buildings[index];
+    public int CountConnectedComponentsForClan(uint clanId) => _territorySystem.CountConnectedComponentsForClan(clanId);
+    public uint GetInterpolatedRegionOwner(int px, int py) => _territorySystem.GetInterpolatedRegionOwner(px, py);
 
     public int GetDeathCount(DeathCause cause) => _agentClanSystem.DeathsByCause[(byte)cause];
 
@@ -394,6 +413,11 @@ public sealed class World
 
     public void SetAgentState(int index, AgentState state) => _agentClanSystem.Agents[index].State = state;
 
+    // Seam de test (session bâtiments) : force la population d'un foyer
+    // pour tester les montées de tier sans dépendre de la croissance
+    // démographique naturelle.
+    public void SetHomePopulationForTest(int homeIndex, int pop) => _buildingSystem.SetHomePopulationForTest(homeIndex, pop);
+
     public void SetAgentTarget(int index, int x, int y)
     {
         _agentClanSystem.Agents[index].TargetX = x;
@@ -425,6 +449,8 @@ public sealed class World
         {
             _territorySystem.TickTerritory();
         }
+
+        _buildingSystem.TickBuildings();
 
         if (AliveCount < _agentClanSystem.MinAliveCountEverObserved)
         {
@@ -461,6 +487,7 @@ public sealed class World
         Mix(ref hash, _rngFire.State);
         Mix(ref hash, _rngAgents.State);
         Mix(ref hash, _rngVegetation.State);
+        Mix(ref hash, _rngBuildings.State);
 
         Mix(ref hash, (ulong)_fireSystem.ActiveCurrent.Count);
         foreach (int index in _fireSystem.ActiveCurrent)
@@ -568,6 +595,20 @@ public sealed class World
         foreach (double value in _vegetationSystem.CellConductivity)
         {
             Mix(ref hash, BitConverter.DoubleToUInt64Bits(value));
+        }
+
+        // Bâtiments (session bâtiments)
+        Mix(ref hash, (ulong)_buildingSystem.Count);
+        for (int i = 0; i < _buildingSystem.Count; i++)
+        {
+            ref Building building = ref _buildingSystem.Buildings[i];
+            Mix(ref hash, building.Id);
+            Mix(ref hash, building.HomeId);
+            Mix(ref hash, building.ClanId);
+            Mix(ref hash, (uint)building.X);
+            Mix(ref hash, (uint)building.Y);
+            Mix(ref hash, building.Type);
+            Mix(ref hash, building.Tier);
         }
 
         // Territoire (session territoire) : STOCK réel, pas une
