@@ -158,6 +158,77 @@ public sealed class TerritorySystem
         return count;
     }
 
+    // Territoire initial (session territoire, ordre de génération) :
+    // attribue un noyau territorial à chaque clan À LA CONSTRUCTION, avant
+    // que ses agents ne soient spawnés -- purement géométrique (distance
+    // foyer <-> centre de région), aucun tirage RNG, aucune diffusion.
+    // TickTerritory() écrasera entièrement cet état dès le premier tick
+    // territoire (re-semé à chaque appel, jamais de mémoire d'un tick à
+    // l'autre) : ceci ne comble que la fenêtre entre la construction et ce
+    // premier tick, qui laissait sinon toutes les régions à NoOwner pendant
+    // le spawn des agents.
+    public void SeedInitialTerritory(double radiusFraction)
+    {
+        RecomputeRegionClaimability();
+
+        double radius = _size * radiusFraction;
+        Home[] homes = _agentClanSystem.Homes;
+
+        // Passe 1 : la région contenant le foyer d'un clan lui appartient
+        // TOUJOURS, sans comparaison de distance -- deux foyers tirés au
+        // hasard pourraient sinon tomber dans la même région, et le clan
+        // perdant la comparaison n'aurait plus aucune case où spawner ne
+        // serait-ce qu'un seul agent (0 population de départ).
+        for (int h = 0; h < homes.Length; h++)
+        {
+            Home home = homes[h];
+            int cell = RegionIndex(home.X, home.Y);
+            if (_regionClaimable[cell])
+            {
+                _regionOwner[cell] = home.ClanId;
+            }
+        }
+
+        // Passe 2 : étend chaque noyau aux régions revendicables encore
+        // neutres, attribuées au foyer le plus proche dans le rayon --
+        // égalité stricte -> premier foyer trouvé (même convention que
+        // TickTerritory).
+        for (int cy = 0; cy < _regionGridHeight; cy++)
+        {
+            for (int cx = 0; cx < _regionGridWidth; cx++)
+            {
+                int cell = cy * _regionGridWidth + cx;
+                if (!_regionClaimable[cell] || _regionOwner[cell] != NoOwner)
+                {
+                    continue;
+                }
+
+                double centerX = cx * _regionCellSize + _regionCellSize * 0.5;
+                double centerY = cy * _regionCellSize + _regionCellSize * 0.5;
+
+                double radiusSquared = radius * radius;
+                int bestHome = -1;
+                double bestDistanceSquared = double.MaxValue;
+                for (int h = 0; h < homes.Length; h++)
+                {
+                    double dx = centerX - homes[h].X;
+                    double dy = centerY - homes[h].Y;
+                    double distanceSquared = dx * dx + dy * dy;
+                    if (distanceSquared <= radiusSquared && distanceSquared < bestDistanceSquared)
+                    {
+                        bestDistanceSquared = distanceSquared;
+                        bestHome = h;
+                    }
+                }
+
+                if (bestHome >= 0)
+                {
+                    _regionOwner[cell] = homes[bestHome].ClanId;
+                }
+            }
+        }
+    }
+
     public void TickTerritory()
     {
         RecomputeRegionClaimability();

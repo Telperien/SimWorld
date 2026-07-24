@@ -264,6 +264,28 @@ if (world.AgentSpawnCapped)
     Console.WriteLine("ATTENTION: le spawn d'agents a atteint sa limite de tentatives (carte quasi sans tuiles walkable ?)");
 }
 
+// Ordre de generation (session territoire) : mesure la proportion
+// d'agents hors du territoire de leur PROPRE clan -- capturee a t=0 (juste
+// apres construction, avant tout Tick) et a nouveau en fin de run. Si ce
+// chiffre reste bas a t=0 mais grimpe en cours de partie, le territoire
+// RECULE sous des agents deja en place (probleme distinct, pas un defaut
+// de generation).
+static (int OutsideCount, int AliveCount) CountAgentsOutsideOwnTerritory(World world)
+{
+    int outsideCount = 0;
+    for (int i = 0; i < world.AliveCount; i++)
+    {
+        Agent agent = world.GetAgent(i);
+        if (world.GetRegionOwnerAt((int)agent.X, (int)agent.Y) != agent.ClanId)
+        {
+            outsideCount++;
+        }
+    }
+    return (outsideCount, world.AliveCount);
+}
+
+var (outsideAtStart, aliveAtStart) = CountAgentsOutsideOwnTerritory(world);
+
 const int ageBuckets = 10;
 
 var samples = new List<(int Tick, int Pop, int BushYoung, int BushMature, int Tree, int Grass, int Ash,
@@ -608,6 +630,12 @@ int neutralRegions = world.NeutralRegionCount();
 double largestShare = world.RegionCount > 0 ? (double)largestClanRegions / world.RegionCount : 0.0;
 Console.WriteLine($"  Regions neutres : {neutralRegions,5} / {world.RegionCount,5}");
 Console.WriteLine($"  Part du plus gros clan : {largestShare,6:P1}");
+
+var (outsideAtEnd, aliveAtEnd) = CountAgentsOutsideOwnTerritory(world);
+double outsideAtStartPct = aliveAtStart > 0 ? 100.0 * outsideAtStart / aliveAtStart : 0.0;
+double outsideAtEndPct = aliveAtEnd > 0 ? 100.0 * outsideAtEnd / aliveAtEnd : 0.0;
+Console.WriteLine($"  Agents hors du territoire de leur propre clan a t=0    : {outsideAtStart,5} / {aliveAtStart,5} ({outsideAtStartPct,5:F1}%)");
+Console.WriteLine($"  Agents hors du territoire de leur propre clan en fin  : {outsideAtEnd,5} / {aliveAtEnd,5} ({outsideAtEndPct,5:F1}%)");
 
 // Buissons murs ACCESSIBLES par clan (session confinement) : le
 // chiffre qui compte maintenant que la recolte est bornee au

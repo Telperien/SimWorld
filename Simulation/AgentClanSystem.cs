@@ -13,6 +13,12 @@ public sealed class AgentClanSystem
     private readonly List<int>[] _agentPaths;
     private uint _nextAgentId;
 
+    // Population cible calculée au constructeur, spawnée seulement plus
+    // tard via SpawnInitialAgents() -- cf. ordre de génération, session
+    // territoire (les foyers/le territoire doivent exister avant les
+    // agents).
+    private readonly int _initialPopulation;
+
     // Buffer de travail pour la recherche BFS : entièrement écrasé (via
     // generation-stamp) à chaque appel, jamais lu entre deux appels.
     // Exclu de Hash() volontairement (cf. CLAUDE.md, Déterminisme).
@@ -276,10 +282,10 @@ public sealed class AgentClanSystem
         // _clans ci-dessus). Id/ClanId assignés ICI, inconditionnellement
         // (comme CreateClans) -- l'identité _homeIndexById[i]==i doit
         // tenir même si un clan échoue à trouver un centre de grappe
-        // (SpawnAgents ci-dessous ne fait alors que remplir X/Y, jamais
-        // sauter la création elle-même). Position (X, Y) posée à la
-        // même passe que le centre de grappe du clan dans SpawnAgents --
-        // pas de second tirage RNG.
+        // (PickHomePositions ci-dessous ne fait alors que remplir X/Y,
+        // jamais sauter la création elle-même). Position (X, Y) posée par
+        // PickHomePositions juste en dessous, même tirage RNG que le
+        // centre de grappe utilisé pour le spawn -- pas de second tirage.
         _homes = new Home[_clans.Length];
         _homeIndexById = new int[_clans.Length];
         for (int i = 0; i < _homes.Length; i++)
@@ -288,7 +294,31 @@ public sealed class AgentClanSystem
             _homeIndexById[i] = i;
         }
 
-        SpawnAgents(initialPopulation);
+        // Ordre de génération (session territoire) : les positions de foyer
+        // sont fixées ICI, pour TOUS les clans, avant tout spawn d'agent --
+        // TerritorySystem (construit par World juste après) en a besoin
+        // pour semer un noyau territorial initial. Le spawn d'agents
+        // proprement dit est déclenché explicitement par World via
+        // SpawnInitialAgents(), une fois ce noyau posé, jamais ici.
+        PickHomePositions();
+        _initialPopulation = initialPopulation;
+    }
+
+    // Un centre de grappe par clan = position de son foyer (même tirage
+    // RNG qu'avant, désormais séparé du spawn d'agents lui-même -- cf.
+    // ordre de génération, session territoire). Un clan qui échoue à
+    // trouver un centre garde son foyer à (0, 0) (identité de
+    // _homeIndexById préservée, jamais de case sautée).
+    private void PickHomePositions()
+    {
+        for (int c = 0; c < _clans.Length; c++)
+        {
+            if (TryPickClusterCenter(out int centerX, out int centerY))
+            {
+                _homes[c].X = centerX;
+                _homes[c].Y = centerY;
+            }
+        }
     }
 
     // Un clan par race disponible, cyclé (une seule race aujourd'hui,
@@ -346,6 +376,12 @@ public sealed class AgentClanSystem
         return sum / AliveCount;
     }
 
+    // Déclenche le spawn de la population initiale -- appelée
+    // explicitement par World, une fois le territoire initial semé (cf.
+    // ordre de génération, session territoire). Les foyers sont déjà
+    // posés (PickHomePositions, au constructeur).
+    public void SpawnInitialAgents() => SpawnAgents(_initialPopulation);
+
     private void SpawnAgents(int count)
     {
         int clanCount = _clans.Length;
@@ -358,18 +394,12 @@ public sealed class AgentClanSystem
         for (int c = 0; c < clanCount && spawned < _agents.Length; c++)
         {
             int clanTarget = perClan + (c < remainder ? 1 : 0);
-            if (clanTarget == 0 || !TryPickClusterCenter(out int centerX, out int centerY))
+            int centerX = _homes[c].X;
+            int centerY = _homes[c].Y;
+            if (clanTarget == 0)
             {
                 continue;
             }
-
-            // Position du foyer du clan : même point que le centre de
-            // grappe utilisé pour le spawn groupé ci-dessus, aucun
-            // tirage RNG supplémentaire. Id/ClanId déjà posés au
-            // constructeur (identité de _homeIndexById préservée même
-            // si ce clan échoue à trouver un centre).
-            _homes[c].X = centerX;
-            _homes[c].Y = centerY;
 
             SpeciesType species = _speciesCatalog.Get(_clans[c].Species);
             int clanSpawned = 0;
@@ -390,6 +420,15 @@ public sealed class AgentClanSystem
                 int x = centerX + (int)dx;
                 int y = centerY + (int)dy;
                 if (x < 0 || x >= _size || y < 0 || y >= _size || !_catalog.Get(_terrainSystem.Terrain[y * _size + x]).Walkable)
+                {
+                    continue;
+                }
+
+                // Ordre de génération (session territoire) : un agent ne
+                // naît jamais hors du territoire de son propre clan --
+                // le noyau initial (TerritorySystem.SeedInitialTerritory)
+                // est déjà en place à cet instant.
+                if (_territorySystem!.GetRegionOwnerAt(x, y) != _clans[c].Id)
                 {
                     continue;
                 }

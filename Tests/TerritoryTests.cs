@@ -35,6 +35,55 @@ public class TerritoryTests
         Assert.Equal(clanId, world.GetRegionOwnerAt(adjacentX, home.Y));
     }
 
+    // Ordre de génération (session territoire) : vérifié AVANT tout
+    // Tick() -- le noyau territorial initial (TerritorySystem.
+    // SeedInitialTerritory) doit exister dès la construction, pas
+    // seulement après le premier tick territoire.
+    [Fact]
+    public void Territory_InitialCoreExists()
+    {
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
+        var world = new World(seed: 960, size: 128, catalog, vegetation, species, config);
+
+        for (int c = 0; c < world.ClanCount; c++)
+        {
+            Home home = world.GetHome(c);
+            uint clanId = world.GetClan(c).Id;
+            Assert.Equal(clanId, world.GetRegionOwnerAt(home.X, home.Y));
+        }
+    }
+
+    // Ordre de génération (session territoire) : aucun agent ne doit
+    // naître hors du territoire de son propre clan -- le noyau initial
+    // est semé AVANT le spawn des agents (cf. World constructeur).
+    // Vérifié à t=0, sans Tick(), sur plusieurs seeds pour ne pas
+    // dépendre d'un tirage RNG chanceux.
+    [Theory]
+    [InlineData(960)]
+    [InlineData(961)]
+    [InlineData(962)]
+    public void Agents_SpawnInsideTheirTerritory(int seed)
+    {
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
+        var world = new World(seed: seed, size: 128, catalog, vegetation, species, config);
+
+        Assert.True(world.AliveCount > 0);
+
+        for (int i = 0; i < world.AliveCount; i++)
+        {
+            Agent agent = world.GetAgent(i);
+            int x = (int)agent.X;
+            int y = (int)agent.Y;
+            Assert.Equal(agent.ClanId, world.GetRegionOwnerAt(x, y));
+        }
+    }
+
     [Fact]
     public void Territory_TwoClansFormBorder()
     {

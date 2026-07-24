@@ -76,6 +76,16 @@ public sealed record SimulationConfig
     // hiérarchie d'échelles de temps CLAUDE.md.
     public required int TerritoryTickInterval { get; init; }
 
+    // Territoire initial (session territoire, ordre de génération) : rayon
+    // du noyau territorial attribué à un clan dès sa création, AVANT le
+    // spawn de ses agents -- garantit qu'aucun agent ne naisse hors du
+    // territoire de son propre clan (t=0). Même convention que
+    // ClanSpawnRadiusFraction (fraction de la taille de la carte) ; même
+    // valeur par défaut : le noyau initial couvre la même zone que le
+    // disque de spawn, cohérent avec le fait que les agents doivent
+    // justement spawner DEDANS.
+    public required double TerritoryInitialRadiusFraction { get; init; }
+
     // Diffusion Jacobi de l'influence par clan, même formule que
     // RebuildFoodGradient (VegetationSystem) -- pas de convergence à
     // l'infini, un nombre fixe d'itérations, re-semé depuis les

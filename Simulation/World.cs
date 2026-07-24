@@ -206,6 +206,12 @@ public sealed class World
             throw new ArgumentException("vegetation catalog must define bush and tree", nameof(vegetationCatalog));
         }
 
+        // Ordre de génération (session territoire) : AgentClanSystem ne
+        // crée ici que les clans et leurs positions de foyer -- ses
+        // agents ne sont spawnés qu'après que TerritorySystem a semé un
+        // noyau territorial initial (SpawnInitialAgents ci-dessous),
+        // garantissant qu'aucun agent ne naît hors du territoire de son
+        // propre clan.
         _agentClanSystem = new AgentClanSystem(size, config, catalog, speciesCatalog, vegetationCatalog, _terrainSystem, _rngWorldGen, _rngAgents);
 
         _vegetationSystem = new VegetationSystem(size, vegetationCatalog, config, _terrainSystem, _rngVegetation,
@@ -216,7 +222,9 @@ public sealed class World
         _fireSystem = new FireSystem(size, config, catalog, vegetationCatalog, _terrainSystem, _vegetationSystem, _rngFire);
 
         _territorySystem = new TerritorySystem(size, config, catalog, _terrainSystem, _agentClanSystem);
+        _territorySystem.SeedInitialTerritory(config.TerritoryInitialRadiusFraction);
         _agentClanSystem.AttachTerritorySystem(_territorySystem);
+        _agentClanSystem.SpawnInitialAgents();
     }
 
     public byte GetTerrainId(int x, int y) => _terrainSystem.Terrain[y * Size + x];

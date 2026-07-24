@@ -39,6 +39,7 @@
   "homeAnchorChance": 0.3,
   "territoryRegionsAcrossMap": 32.0,
   "territoryTickInterval": 300,
+  "territoryInitialRadiusFraction": 0.33,
   "territoryDiffusionRate": 0.3,
   "territoryDiffusionIterations": 8,
   "territoryPopulationWeight": 1.0,

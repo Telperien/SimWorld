@@ -10,15 +10,23 @@ public partial class WorldRenderer : Sprite2D
     private const int FireRadius = 3;
     private static readonly Color FireColor = new(1f, 0.4f, 0f);
 
-    // Teinte territoire (session territoire, corrigée session rendu
-    // bordure) : un remplissage franc disparaissait sur l'herbe sombre
-    // moucheté (visible seulement sur l'eau). Remplissage réduit à
-    // peine perceptible, bordure renforcée et élargie -- une frontière
-    // TRACÉE se lit sur n'importe quel fond, contrairement à un
-    // aplat translucide.
-    private const float TerritoryTintAlpha = 0.08f;
-    private const float TerritoryBorderAlpha = 0.55f;
-    private const int TerritoryBorderMarginTiles = 2;
+    // Lisibilité territoire (session territoire, 3e tentative -- les deux
+    // précédentes teintaient/bordaient l'INTÉRIEUR du territoire, un
+    // liseré fin ne gagne jamais contre une texture bruitée). Logique
+    // inversée : on assombrit/désature le terrain NEUTRE (hors de tout
+    // territoire) au lieu de teinter l'intérieur -- un écart de
+    // LUMINOSITÉ se lit sur n'importe quel fond, contrairement à un
+    // liseré coloré ou un aplat translucide. Le territoire garde sa
+    // luminosité/texture normale, avec juste une légère teinte de clan.
+    // Un liseré clair reste nécessaire, mais UNIQUEMENT entre deux
+    // territoires de clans DIFFÉRENTS (clan contre clan) : la frontière
+    // territoire-neutre, elle, se lit déjà via le saut de luminosité.
+    private const float NeutralDarkenAlpha = 0.5f;
+    private static readonly Color NeutralDarkTarget = new(0.08f, 0.08f, 0.08f);
+    private const float TerritoryTintAlpha = 0.12f;
+    private static readonly Color ClanBorderColor = new(0.95f, 0.95f, 0.95f);
+    private const float ClanBorderAlpha = 0.65f;
+    private const int TerritoryBorderMarginTiles = 3;
 
     public World World { get; private set; } = null!;
 
@@ -122,10 +130,17 @@ public partial class WorldRenderer : Sprite2D
                     : ColorFromHex(_catalog.Get(World.GetTerrainId(x, y)).Color);
 
                 uint owner = World.GetRegionOwnerAt(x, y);
-                if (owner != TerritorySystem.NoOwner && _clanColorByOwnerId.TryGetValue(owner, out Color clanColor))
+                if (owner == TerritorySystem.NoOwner)
                 {
-                    bool nearBorder = IsNearTerritoryBorder(x, y, owner, regionCellSize, regionGridWidth, regionGridHeight);
-                    color = color.Lerp(clanColor, nearBorder ? TerritoryBorderAlpha : TerritoryTintAlpha);
+                    color = color.Lerp(NeutralDarkTarget, NeutralDarkenAlpha);
+                }
+                else if (_clanColorByOwnerId.TryGetValue(owner, out Color clanColor))
+                {
+                    color = color.Lerp(clanColor, TerritoryTintAlpha);
+                    if (IsNearRivalClanBorder(x, y, owner, regionCellSize, regionGridWidth, regionGridHeight))
+                    {
+                        color = color.Lerp(ClanBorderColor, ClanBorderAlpha);
+                    }
                 }
 
                 _image.SetPixel(x, y, color);
@@ -135,37 +150,40 @@ public partial class WorldRenderer : Sprite2D
         _texture.Update(_image);
     }
 
-    // Frontière (session territoire) : un pixel à moins de
-    // TerritoryBorderMarginTiles du bord de SA cellule région, dont la
-    // cellule voisine dans cette direction a un propriétaire DIFFÉRENT
-    // (y compris neutre), reçoit une teinte plus marquée -- crée un
-    // liseré visible sans géométrie séparée.
-    private bool IsNearTerritoryBorder(int x, int y, uint owner, int regionCellSize, int regionGridWidth, int regionGridHeight)
+    // Frontière clan-contre-clan (session territoire, rendu inversé) : un
+    // pixel à moins de TerritoryBorderMarginTiles du bord de SA cellule
+    // région, dont la cellule voisine dans cette direction appartient à un
+    // AUTRE CLAN (jamais au neutre -- cette frontière-là se lit déjà via
+    // l'assombrissement du neutre), reçoit un liseré clair marqué.
+    private bool IsNearRivalClanBorder(int x, int y, uint owner, int regionCellSize, int regionGridWidth, int regionGridHeight)
     {
         int cellX = x / regionCellSize;
         int cellY = y / regionCellSize;
         int localX = x - cellX * regionCellSize;
         int localY = y - cellY * regionCellSize;
 
-        if (localX < TerritoryBorderMarginTiles && cellX > 0 && World.GetRegionOwnerAt(x - regionCellSize, y) != owner)
+        if (localX < TerritoryBorderMarginTiles && cellX > 0 && IsRivalClan(World.GetRegionOwnerAt(x - regionCellSize, y), owner))
         {
             return true;
         }
-        if (localX >= regionCellSize - TerritoryBorderMarginTiles && cellX < regionGridWidth - 1 && World.GetRegionOwnerAt(x + regionCellSize, y) != owner)
+        if (localX >= regionCellSize - TerritoryBorderMarginTiles && cellX < regionGridWidth - 1 && IsRivalClan(World.GetRegionOwnerAt(x + regionCellSize, y), owner))
         {
             return true;
         }
-        if (localY < TerritoryBorderMarginTiles && cellY > 0 && World.GetRegionOwnerAt(x, y - regionCellSize) != owner)
+        if (localY < TerritoryBorderMarginTiles && cellY > 0 && IsRivalClan(World.GetRegionOwnerAt(x, y - regionCellSize), owner))
         {
             return true;
         }
-        if (localY >= regionCellSize - TerritoryBorderMarginTiles && cellY < regionGridHeight - 1 && World.GetRegionOwnerAt(x, y + regionCellSize) != owner)
+        if (localY >= regionCellSize - TerritoryBorderMarginTiles && cellY < regionGridHeight - 1 && IsRivalClan(World.GetRegionOwnerAt(x, y + regionCellSize), owner))
         {
             return true;
         }
 
         return false;
     }
+
+    private static bool IsRivalClan(uint neighborOwner, uint owner) =>
+        neighborOwner != TerritorySystem.NoOwner && neighborOwner != owner;
 
     private static Color ColorFromHex(uint hex)
     {

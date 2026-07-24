@@ -41,3 +41,24 @@ prise. Se lit à la demande, avant de rouvrir un débat de design.
   d'implémentation recensés dans docs/REVUE-ARCHITECTURE-SESSION7.md
   (addendum 2) : réserver par index de tuile, libération sur mort/
   abandon/destruction, Hash() dans la même session.
+
+## 2026-07-24 — Rendu territoire : assombrir le neutre, pas teinter l'intérieur
+
+- Deux tentatives précédentes (teinte franche, puis liseré fin
+  renforcé) ont échoué à rendre la frontière de territoire lisible sur
+  l'herbe moucheté — seulement visible sur l'eau unie. Un liseré fin
+  ou un aplat translucide ne gagne jamais contre une texture bruitée.
+- Décision : inverser la logique. Le terrain NEUTRE (hors de tout
+  territoire) est assombri/désaturé vers un gris sombre fixe ; le
+  territoire garde sa luminosité/texture normale avec une légère
+  teinte de clan. Un écart de LUMINOSITÉ se lit sur n'importe quel
+  fond, contrairement à une différence de teinte. Un liseré clair
+  explicite reste nécessaire, mais seulement entre deux territoires de
+  clans DIFFÉRENTS (la frontière territoire-neutre se lit déjà via le
+  saut de luminosité). Implémenté dans `scripts/WorldRenderer.cs`
+  (session territoire, suite).
+- Toute future mécanique de rendu "zone possédée vs zone libre" doit
+  suivre ce même principe (contraste de luminosité en fond, liseré
+  explicite réservé aux frontières entre deux zones toutes deux
+  "actives") plutôt que de re-tenter une teinte/bordure sur la zone
+  possédée elle-même.

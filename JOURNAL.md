@@ -1328,4 +1328,83 @@ remplace (dynamique de pression réelle, cohérente avec l'écosystème).
   (déjà en attente depuis la session précédente).
 - Golden-hash : cassé deux fois (eau + design révisé du confinement),
   valeur finale signalée ci-dessus.
+
+## Session territoire (suite) — lisibilité du rendu + ordre de génération
+
+### Rendu (3e tentative, logique inversée)
+Les deux tentatives précédentes teintaient/bordaient l'INTÉRIEUR du
+territoire — invisible sur l'herbe moucheté, lisible seulement sur
+l'eau unie. Changement de mécanisme (pas d'affinage) : le terrain
+NEUTRE (hors de tout territoire) est désormais assombri/désaturé vers
+un gris sombre fixe (`NeutralDarkTarget`, alpha 0,5). Un écart de
+LUMINOSITÉ se lit sur n'importe quelle texture, contrairement à un
+liseré fin ou un aplat translucide. Le territoire garde sa
+luminosité/texture normale (légère teinte de clan, alpha remonté à
+0,12). Un liseré clair (quasi blanc, alpha 0,65, marge élargie à 3
+tuiles) reste nécessaire, mais UNIQUEMENT entre deux territoires de
+clans DIFFÉRENTS — la frontière territoire-neutre n'a plus besoin de
+liseré dédié, elle se lit déjà via le saut de luminosité.
+`scripts/WorldRenderer.cs` seul modifié.
+
+**Ce qui doit être visible au F5** : les zones non revendiquées
+apparaissent nettement plus sombres/grisâtres (une "brousse" lisible
+d'un coup d'œil, sans zoom) ; chaque territoire de clan garde sa
+texture normale avec une légère teinte de couleur ; un liseré clair
+net marque uniquement les frontières clan-contre-clan.
+
+### Ordre de génération — territoire avant agents
+Avant : les agents spawnaient (disque aléatoire autour d'un centre de
+grappe) AVANT que `TerritorySystem` ne calcule la moindre possession
+(régions allouées à `NoOwner`, premier `TickTerritory()` seulement au
+premier `Tick()`) — des agents naissaient hors de tout territoire.
+
+Inversé : `AgentClanSystem` sépare désormais le choix des positions de
+foyer (`PickHomePositions`, au constructeur, pour tous les clans) du
+spawn des agents (`SpawnInitialAgents`, appelée explicitement par
+`World` après coup). `TerritorySystem.SeedInitialTerritory(radius)`
+attribue un noyau territorial à chaque clan dès la construction (passe
+1 : la région du foyer lui appartient toujours, sans comparaison —
+évite qu'un clan perde jusqu'à sa propre case foyer si deux foyers
+tombent dans la même région ; passe 2 : étend aux régions
+revendicables dans le rayon, attribuées au foyer le plus proche).
+Nouveau paramètre `territoryInitialRadiusFraction` (0,33, même
+convention que `clanSpawnRadiusFraction`). Le spawn d'agent rejette
+désormais toute position dont la région n'appartient pas au clan de
+l'agent. `TickTerritory()` (diffusion par tick) est inchangé et
+écrase entièrement ce noyau dès le premier tick — aucune régression
+sur les tests territoire existants (tous vérifiés après `Tick()`).
+
+### Mesure (proportion d'agents hors de leur territoire)
+`Tools/SimReport` rapporte désormais ce chiffre à t=0 et en fin de
+run. Résultat (seed 42, 512², 3 clans, 5000 ticks) :
+- **t=0 : 0 / 199 (0,0%)** — garantie tenue, plus aucun agent ne naît
+  hors de son territoire.
+- **fin de run (tick 5000) : 108 / 194 (55,7%)** — en forte hausse.
+
+Ce n'est PAS un défaut de génération (le t=0 le prouve) mais un recul
+du territoire SOUS les agents en cours de partie — le territoire est
+recalculé from scratch à chaque tick territoire (re-semé depuis les
+foyers, diffusion sur nombre fixe d'itérations) et peut donc se
+rétracter sans mémoire si l'influence d'un clan faiblit relativement à
+ses voisins. Recoupe le chiffre "4 agents sur 5 hors territoire"
+observé la session précédente (voir plus haut). Problème distinct,
+non traité cette session — piste pour une prochaine session
+(hystérésis ? territoire minimal garanti par population ?).
+
+### Tests
+`Territory_InitialCoreExists` (noyau initial présent à t=0, avant tout
+`Tick()`), `Agents_SpawnInsideTheirTerritory` (theory sur 3 seeds,
+100% des agents dans le territoire de leur clan à t=0). Tests
+territoire existants tous verts sans modification. Golden-hash cassé
+(ordre de tirage RNG changé par le rejet supplémentaire au spawn),
+nouvelle valeur : `9930508189263871011`.
+
+### Vérification
+- `dotnet build` (WorldSim.csproj + Simulation) : verts.
+- `dotnet test --filter "Speed!=Slow"` : 66/66 verts (golden-hash
+  recalculé).
+- `dotnet run --project Tools/SimReport -- --ticks 5000` : chiffres
+  ci-dessus relevés.
+- Rendu Godot non vérifié visuellement dans cet environnement (pas de
+  session interactive F5 disponible ici) — à confirmer par l'utilisateur.
 - `git status` : commit dédié, permission avant push.
