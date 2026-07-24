@@ -594,6 +594,21 @@ for (int c = 0; c < world.HomeCount; c++)
 }
 Console.WriteLine($"  Distance moyenne agent->foyer de son clan : {world.AverageDistanceToHome(),8:F2}");
 
+// --- Territoire (session territoire) ---
+Console.WriteLine();
+Console.WriteLine("--- Territoire (session territoire) ---");
+int largestClanRegions = 0;
+for (int c = 0; c < world.ClanCount; c++)
+{
+    int regions = world.CountRegionsOwnedBy(world.GetClan(c).Id);
+    largestClanRegions = Math.Max(largestClanRegions, regions);
+    Console.WriteLine($"  Clan {c} : regions={regions,5} / {world.RegionCount,5}");
+}
+int neutralRegions = world.NeutralRegionCount();
+double largestShare = world.RegionCount > 0 ? (double)largestClanRegions / world.RegionCount : 0.0;
+Console.WriteLine($"  Regions neutres : {neutralRegions,5} / {world.RegionCount,5}");
+Console.WriteLine($"  Part du plus gros clan : {largestShare,6:P1}");
+
 // Histogrammes des ages a 4 instants choisis APRES COUP sur la courbe
 // de population deja collectee (session 14b, diagnostic boom-bust) :
 // baseline (premier echantillon), pic (argmax pop), creux suivant le

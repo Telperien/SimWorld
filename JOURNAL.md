@@ -1164,3 +1164,85 @@ paramètre de `simulation.json` touché.
 - Golden-hash : cassé (attendu, le monde initial change légitimement),
   recalculé : `3617630654454750702`.
 - `git status` : commit dédié, permission avant push.
+
+## Session territoire — la structure sociale visible au sol
+
+### Contexte
+Les clans se distinguaient déjà par couleur (agents, foyers) mais sans
+frontière visible, la structure politique restait illisible. Nouveau
+`Simulation/TerritorySystem.cs` : grille grossière de régions (32²
+pour 512², dérivée de la taille de la carte via
+`TerritoryRegionsAcrossMap`, jamais une constante en dur), chacune
+possédée par au plus un clan, dérivée par diffusion Jacobi en double
+buffer -- même patron que `RebuildFoodGradient` (végétation) -- sur un
+tick lent (`TerritoryTickInterval=300`, un ordre de grandeur au-dessus
+du tick végétation).
+
+### Ce qui fait grossir le territoire
+Population × distance au foyer, implémenté sans calcul de distance
+explicite : la magnitude de la source déposée au foyer est
+proportionnelle à la population du clan, et un nombre FIXE
+d'itérations de diffusion (pas de convergence) fait qu'un clan
+nombreux pousse une source qui reste au-dessus du seuil de
+revendication plus loin. Re-semé depuis zéro à CHAQUE tick territoire
+(pas de mémoire d'un tick à l'autre) -- un clan qui décline relâche
+automatiquement ses régions, aucun code spécial. Conflit entre deux
+influences : la plus forte gagne, sans hystérésis (pas de conquête
+cette session).
+
+### Décision : pas de couplage territoire × ancrage foyer
+`HomeAnchorChance` reste inchangé. Le territoire est déjà dérivé du
+foyer (population+position) -- l'y coupler créerait une boucle de
+renforcement redondante avec ce que l'ancrage fait déjà directement,
+pour un gain non demandé cette session.
+
+### Calibrage empirique du seuil de revendication (mesuré, pas deviné)
+Premier essai `TerritoryClaimThreshold=1.0` : ÉCHEC total à population
+réaliste (4 agents/clan sur une carte de test 128²) -- l'influence au
+foyer lui-même ne dépassait que ~0,6 après diffusion (la diffusion
+étale la source sur toute la grille, pas de conservation stricte au
+point source). Mesuré directement (`GetInfluence`, nouvel accesseur
+diagnostic), seuil recalé à **0,15** -- confirmé retenir le foyer + au
+moins une région adjacente pour une population de 4, tout en laissant
+la revendication croître proportionnellement avec la population
+(vérifié : à 200k ticks, ~65-90 agents/clan, 22-34 régions/clan
+revendiquées sur 1024).
+
+### Rendu -- teinte directement dans `WorldRenderer.Redraw()`
+Pas de nouveau node : la grille est grossière (1024 cellules pour
+512²), intégrée dans la boucle `SetPixel` déjà existante. Opacité
+faible (0,22) pour ne pas noyer agents/buissons/arbres déjà en place,
+plus marquée (0,45) à 1 tuile d'une frontière (liseré). Chaque
+renderer garde sa propre copie de `PaletteCatalog` (convention déjà
+établie, pas de dépendance croisée).
+
+### Tests (`Tests/TerritoryTests.cs`, 4 fast + 1 slow)
+`Territory_ExpandsFromHome`, `Territory_TwoClansFormBorder` (nouveau
+seam `World.SetHomePosition`, force deux foyers proches + densité
+boostée pour une vraie frontière clan-contre-clan déterministe, pas
+juste clan-contre-neutre), `Territory_IsDeterministic`,
+`Harvester_CanLeaveTerritory` (prouve l'absence de restriction
+physique). `Slow_Population_RemainsViable_LongRun` (2M ticks, seeds
+42/7) dans `Tests/SlowTests.cs`.
+
+### Observation post-implémentation (pas un fix)
+À 800k ticks (seed 42), le territoire s'est CONTRACTÉ par rapport à
+200k ticks (22/34/34 régions → 15/21/21) -- pas un bug du territoire,
+la population des 3 clans a elle-même décliné sur cette fenêtre
+(65-90 → 18-21/clan), confirmant que le mécanisme suit fidèlement la
+démographie réelle, y compris à la baisse. Ce déclin de population
+est vraisemblablement lié à l'effondrement de clan déjà signalé
+session précédente (`Clan_PoolNeverCollapsesToZero_InNormalConditions`,
+marqué Skip) -- non touché ici, hors scope.
+
+### Vérification
+- `dotnet build` (5 projets) : tous verts.
+- `dotnet test --filter "Speed!=Slow"` : 60/60 verts.
+- `dotnet test --filter "Speed=Slow"` : NON lancé à terme cette
+  session (interrompu à la demande, à relancer plus tard) --
+  `Slow_Population_RemainsViable_LongRun` (nouveau, 2M ticks, seeds
+  42/7) reste à vérifier avant un prochain commit de fin de chantier
+  de calibrage.
+- Golden-hash : cassé (attendu, nouvel état réel dans `Hash()`),
+  recalculé : `18037449294380057181`.
+- `git status` : commit dédié, permission avant push.

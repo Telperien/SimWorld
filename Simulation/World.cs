@@ -28,6 +28,7 @@ public sealed class World
     private readonly VegetationSystem _vegetationSystem;
     private readonly FireSystem _fireSystem;
     private readonly AgentClanSystem _agentClanSystem;
+    private readonly TerritorySystem _territorySystem;
     private readonly Catalog<TerrainType> _catalog;
     private readonly Catalog<VegetationType> _vegetationCatalog;
     private readonly Catalog<SpeciesType> _speciesCatalog;
@@ -125,6 +126,25 @@ public sealed class World
 
     public double AverageDistanceToHome() => _agentClanSystem.AverageDistanceToHome();
 
+    // Territoire (session territoire) : grille grossière de régions,
+    // même raisonnement de sûreté d'itération externe que Clans/Homes
+    // ci-dessus (capacité fixe, jamais compactée).
+    public int RegionCellSize => _territorySystem.RegionCellSize;
+
+    public int RegionGridWidth => _territorySystem.RegionGridWidth;
+
+    public int RegionGridHeight => _territorySystem.RegionGridHeight;
+
+    public int RegionCount => _territorySystem.RegionCount;
+
+    public uint GetRegionOwnerAt(int x, int y) => _territorySystem.GetRegionOwnerAt(x, y);
+
+    public int CountRegionsOwnedBy(uint clanId) => _territorySystem.CountRegionsOwnedBy(clanId);
+
+    public int NeutralRegionCount() => _territorySystem.NeutralRegionCount();
+
+    public double GetTerritoryInfluence(uint clanId, int x, int y) => _territorySystem.GetInfluence(_agentClanSystem.ClanIndex(clanId), x, y);
+
     public static IReadOnlyList<double> DeathDistanceBucketUpperBounds => AgentClanSystem.DeathDistanceBucketUpperBounds;
 
     public int[] GetDeathDistanceHistogram() => (int[])_agentClanSystem.DeathDistanceHistogram.Clone();
@@ -192,6 +212,8 @@ public sealed class World
         _agentClanSystem.AttachVegetationSystem(_vegetationSystem);
 
         _fireSystem = new FireSystem(size, config, catalog, vegetationCatalog, _terrainSystem, _vegetationSystem, _rngFire);
+
+        _territorySystem = new TerritorySystem(size, config, _agentClanSystem);
     }
 
     public byte GetTerrainId(int x, int y) => _terrainSystem.Terrain[y * Size + x];
@@ -350,6 +372,15 @@ public sealed class World
 
     public void SetClanFoodPool(int clanIndex, int amount) => _agentClanSystem.Clans[clanIndex].FoodPool = amount;
 
+    // Seam de test (session territoire) : force la position d'un
+    // foyer -- même statut que SetClanFoodPool/SetAgentPosition,
+    // jamais utilisé par la simulation elle-même.
+    public void SetHomePosition(int homeIndex, int x, int y)
+    {
+        _agentClanSystem.Homes[homeIndex].X = x;
+        _agentClanSystem.Homes[homeIndex].Y = y;
+    }
+
     public void SetAgentState(int index, AgentState state) => _agentClanSystem.Agents[index].State = state;
 
     public void SetAgentTarget(int index, int x, int y)
@@ -377,6 +408,11 @@ public sealed class World
             _vegetationSystem.RebuildFoodDensityGrid();
             _vegetationSystem.RebuildCellConductivity();
             _vegetationSystem.RebuildFoodGradient();
+        }
+
+        if (_tickCounter % _config.TerritoryTickInterval == 0)
+        {
+            _territorySystem.TickTerritory();
         }
 
         if (AliveCount < _agentClanSystem.MinAliveCountEverObserved)
@@ -521,6 +557,15 @@ public sealed class World
         foreach (double value in _vegetationSystem.CellConductivity)
         {
             Mix(ref hash, BitConverter.DoubleToUInt64Bits(value));
+        }
+
+        // Territoire (session territoire) : STOCK réel, pas une
+        // capacité dérivée à la lecture -- inclus explicitement.
+        Mix(ref hash, (ulong)_territorySystem.RegionGridWidth);
+        Mix(ref hash, (ulong)_territorySystem.RegionGridHeight);
+        foreach (uint owner in _territorySystem.RegionOwner)
+        {
+            Mix(ref hash, owner);
         }
 
         return hash;

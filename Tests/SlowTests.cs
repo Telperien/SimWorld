@@ -413,3 +413,30 @@ public class Slow_Population_RemainsClanClustered_LongRun
             $"distance moyenne agent->foyer ({averageDistance:F1}) derive au-dela de la moitie de la carte apres 2M ticks");
     }
 }
+
+// Session territoire : verifie que l'ajout du systeme territoire (tick
+// lent, aucune restriction physique sur les agents) ne degrade pas la
+// viabilite de la population sur un run long -- re-verification
+// defensive, pas un nouveau comportement a mesurer en soi.
+[Trait("Speed", "Slow")]
+public class Slow_Population_RemainsViable_LongRun
+{
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Population_RemainsViable_LongRun(int seed)
+    {
+        var catalog = TestCatalogs.LoadTerrain();
+        var vegetation = TestCatalogs.LoadVegetation();
+        var species = TestCatalogs.LoadSpecies();
+        var config = TestCatalogs.LoadSimulation();
+        var world = new World(seed, size: 512, catalog, vegetation, species, config);
+
+        for (int i = 0; i < 2_000_000; i++)
+        {
+            world.Tick(World.TickIntervalSeconds);
+        }
+
+        Assert.True(world.AliveCount > 0, "population eteinte apres 2M ticks avec le systeme territoire actif");
+    }
+}

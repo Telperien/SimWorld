@@ -136,6 +136,13 @@ la faim (s19c) : tout mécanisme qui pourrait un jour verrouiller un
 agent en attente d'une ressource ou d'une position externe est un
 deadlock en puissance.
 
+Le territoire d'un clan vit sur une grille grossière (régions),
+jamais par tuile. Il s'étend par influence map diffusée en double
+buffer (même pattern que le feu et le gradient de nourriture), sur
+le tick lent. Le territoire est un STOCK et entre dans Hash(). Les
+agents ne sont PAS restreints à leur territoire (un cueilleur en
+sort librement).
+
 ## Récolte — réservation de cible
 - Un agent qui cible un buisson/gisement pour récolte le RÉSERVE :
   un autre agent en recherche ne doit pas converger vers la même

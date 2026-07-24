@@ -65,6 +65,33 @@ public sealed record SimulationConfig
     // section Social.
     public required double HomeAnchorChance { get; init; }
 
+    // Territoire (session territoire) : résolution de la grille de
+    // régions, dérivée de la taille de la carte (comme
+    // TerrainFeaturesAcrossMap) plutôt qu'une constante en dur --
+    // cible CLAUDE.md "32² pour 512²".
+    public required double TerritoryRegionsAcrossMap { get; init; }
+
+    // Tick lent (géopolitique, pas physique) -- un ordre de grandeur
+    // au-dessus de VegetationTickInterval, cohérent avec la
+    // hiérarchie d'échelles de temps CLAUDE.md.
+    public required int TerritoryTickInterval { get; init; }
+
+    // Diffusion Jacobi de l'influence par clan, même formule que
+    // RebuildFoodGradient (VegetationSystem) -- pas de convergence à
+    // l'infini, un nombre fixe d'itérations, re-semé depuis les
+    // foyers à chaque tick territoire.
+    public required double TerritoryDiffusionRate { get; init; }
+
+    public required int TerritoryDiffusionIterations { get; init; }
+
+    // Magnitude de la source d'influence déposée à chaque foyer =
+    // population du clan × ce poids.
+    public required double TerritoryPopulationWeight { get; init; }
+
+    // Valeur minimale d'influence pour qu'une région soit revendiquée
+    // -- sous ce seuil, la région reste neutre.
+    public required double TerritoryClaimThreshold { get; init; }
+
     public static SimulationConfig Load(string json)
     {
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
