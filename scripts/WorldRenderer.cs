@@ -10,14 +10,15 @@ public partial class WorldRenderer : Sprite2D
     private const int FireRadius = 3;
     private static readonly Color FireColor = new(1f, 0.4f, 0f);
 
-    // Teinte territoire (session territoire) : constantes de rendu, pas
-    // des valeurs de gameplay -- opacité FAIBLE pour laisser agents/
-    // buissons/arbres parfaitement lisibles par-dessus, plus marquée à
-    // 1 tuile d'une frontière pour un liseré visible sans géométrie
-    // séparée.
-    private const float TerritoryTintAlpha = 0.22f;
-    private const float TerritoryBorderAlpha = 0.45f;
-    private const int TerritoryBorderMarginTiles = 1;
+    // Teinte territoire (session territoire, corrigée session rendu
+    // bordure) : un remplissage franc disparaissait sur l'herbe sombre
+    // moucheté (visible seulement sur l'eau). Remplissage réduit à
+    // peine perceptible, bordure renforcée et élargie -- une frontière
+    // TRACÉE se lit sur n'importe quel fond, contrairement à un
+    // aplat translucide.
+    private const float TerritoryTintAlpha = 0.08f;
+    private const float TerritoryBorderAlpha = 0.55f;
+    private const int TerritoryBorderMarginTiles = 2;
 
     public World World { get; private set; } = null!;
 

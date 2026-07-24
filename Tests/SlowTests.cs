@@ -414,8 +414,9 @@ public class Slow_Population_RemainsClanClustered_LongRun
     }
 }
 
-// Session territoire : verifie que l'ajout du systeme territoire (tick
-// lent, aucune restriction physique sur les agents) ne degrade pas la
+// Session territoire : verifie que le confinement au territoire
+// (session rendu bordure + confinement -- ressources et deplacement
+// bornes au territoire du clan, cf. CLAUDE.md) ne degrade pas la
 // viabilite de la population sur un run long -- re-verification
 // defensive, pas un nouveau comportement a mesurer en soi.
 [Trait("Speed", "Slow")]

@@ -139,6 +139,8 @@ public sealed class World
 
     public uint GetRegionOwnerAt(int x, int y) => _territorySystem.GetRegionOwnerAt(x, y);
 
+    public bool IsRegionClaimableAt(int x, int y) => _territorySystem.IsRegionClaimableAt(x, y);
+
     public int CountRegionsOwnedBy(uint clanId) => _territorySystem.CountRegionsOwnedBy(clanId);
 
     public int NeutralRegionCount() => _territorySystem.NeutralRegionCount();
@@ -213,7 +215,8 @@ public sealed class World
 
         _fireSystem = new FireSystem(size, config, catalog, vegetationCatalog, _terrainSystem, _vegetationSystem, _rngFire);
 
-        _territorySystem = new TerritorySystem(size, config, _agentClanSystem);
+        _territorySystem = new TerritorySystem(size, config, catalog, _terrainSystem, _agentClanSystem);
+        _agentClanSystem.AttachTerritorySystem(_territorySystem);
     }
 
     public byte GetTerrainId(int x, int y) => _terrainSystem.Terrain[y * Size + x];
@@ -566,6 +569,14 @@ public sealed class World
         foreach (uint owner in _territorySystem.RegionOwner)
         {
             Mix(ref hash, owner);
+        }
+
+        // Revendicabilité (session territoire, eau exclue) : dérivée
+        // du terrain (déjà hashé), incluse quand même par le même
+        // raisonnement de prudence que FoodGradient/CellConductivity.
+        foreach (bool claimable in _territorySystem.RegionClaimable)
+        {
+            Mix(ref hash, claimable ? 1UL : 0UL);
         }
 
         return hash;

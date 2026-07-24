@@ -204,6 +204,18 @@ public sealed class AgentClanSystem
 
     public void AttachVegetationSystem(VegetationSystem vegetationSystem) => _vegetationSystem = vegetationSystem;
 
+    // Même patron pour le cycle Agent↔Territoire (session territoire,
+    // confinement) : TerritorySystem a besoin d'AgentClanSystem
+    // (population, foyers) pour se construire, mais la recherche/
+    // errance agent a besoin d'une référence VIVANTE vers
+    // TerritorySystem (propriétaire de région, mis à jour au tick
+    // territoire). World construit AgentClanSystem, puis
+    // TerritorySystem, puis appelle AttachTerritorySystem UNE FOIS,
+    // avant tout Tick().
+    private TerritorySystem? _territorySystem;
+
+    public void AttachTerritorySystem(TerritorySystem territorySystem) => _territorySystem = territorySystem;
+
     public AgentClanSystem(int size, SimulationConfig config, Catalog<TerrainType> catalog, Catalog<SpeciesType> speciesCatalog,
         Catalog<VegetationType> vegetationCatalog, TerrainSystem terrainSystem, Rng rngWorldGen, Rng rngAgents)
     {
@@ -588,7 +600,8 @@ public sealed class AgentClanSystem
         int targetY = currentY + bestDy;
 
         if (targetX < 0 || targetX >= _size || targetY < 0 || targetY >= _size ||
-            !_catalog.Get(_terrainSystem.Terrain[targetY * _size + targetX]).Walkable)
+            !_catalog.Get(_terrainSystem.Terrain[targetY * _size + targetX]).Walkable ||
+            IsRivalTerritory(targetX, targetY, agent.ClanId))
         {
             return false;
         }
@@ -663,9 +676,11 @@ public sealed class AgentClanSystem
         int targetY = currentY + dy;
 
         if (targetX < 0 || targetX >= _size || targetY < 0 || targetY >= _size ||
-            !_catalog.Get(_terrainSystem.Terrain[targetY * _size + targetX]).Walkable)
+            !_catalog.Get(_terrainSystem.Terrain[targetY * _size + targetX]).Walkable ||
+            IsRivalTerritory(targetX, targetY, agent.ClanId))
         {
-            // Direction bloquée (bord de carte / obstacle) : force un
+            // Direction bloquée (bord de carte / obstacle / territoire
+            // rival, session territoire -- confinement) : force un
             // nouveau tirage au prochain essai plutôt que de re-cogner
             // indéfiniment contre le même mur (même esprit que le fix
             // anti-gel du cooldown de faim, s10).
@@ -683,7 +698,26 @@ public sealed class AgentClanSystem
         agent.State = AgentState.Moving;
     }
 
-    public bool TryFindNearestMatureBush(int startX, int startY, List<int> outputPath)
+    // Confinement (session territoire, révisé après mesure) : le
+    // MOUVEMENT (errance, suivi de gradient) reste possible en terrain
+    // NEUTRE, bloqué seulement en territoire RIVAL -- pas "doit être
+    // mon clan strictement". Une région change de main à chaque tick
+    // territoire (re-semé depuis la population courante, sans
+    // mémoire) ; une confinement strict à "mon clan uniquement"
+    // échouait empiriquement : un agent debout sur une région qui
+    // vient de repasser neutre (aucun cas rare -- observé sur un run
+    // ordinaire) n'avait plus AUCUNE case candidate valide et restait
+    // figé en permanence. La RESSOURCE (récolte, TryEnqueue ci-dessous)
+    // reste strictement bornée au territoire du clan -- c'est elle qui
+    // porte "les ressources ne sont accessibles que dans le territoire
+    // du clan", pas le simple déplacement.
+    private bool IsRivalTerritory(int x, int y, uint clanId)
+    {
+        uint owner = _territorySystem!.GetRegionOwnerAt(x, y);
+        return owner != TerritorySystem.NoOwner && owner != clanId;
+    }
+
+    public bool TryFindNearestMatureBush(int startX, int startY, uint clanId, List<int> outputPath)
     {
         outputPath.Clear();
         _searchGenerationCounter++;
@@ -717,16 +751,16 @@ public sealed class AgentClanSystem
                 return true;
             }
 
-            TryEnqueue(lx - 1, ly, current, originX, originY);
-            TryEnqueue(lx + 1, ly, current, originX, originY);
-            TryEnqueue(lx, ly - 1, current, originX, originY);
-            TryEnqueue(lx, ly + 1, current, originX, originY);
+            TryEnqueue(lx - 1, ly, current, originX, originY, clanId);
+            TryEnqueue(lx + 1, ly, current, originX, originY, clanId);
+            TryEnqueue(lx, ly - 1, current, originX, originY, clanId);
+            TryEnqueue(lx, ly + 1, current, originX, originY, clanId);
         }
 
         return false;
     }
 
-    private void TryEnqueue(int lx, int ly, int fromLocal, int originX, int originY)
+    private void TryEnqueue(int lx, int ly, int fromLocal, int originX, int originY, uint clanId)
     {
         if (lx < 0 || lx >= _boxSide || ly < 0 || ly >= _boxSide)
         {
@@ -741,6 +775,14 @@ public sealed class AgentClanSystem
         }
 
         if (!_catalog.Get(_terrainSystem.Terrain[worldY * _size + worldX]).Walkable)
+        {
+            return;
+        }
+
+        // Confinement territorial (session territoire) : un cueilleur
+        // ne peut jamais quitter les régions possédées par son clan --
+        // la ressource n'est accessible que dans le territoire.
+        if (_territorySystem!.GetRegionOwnerAt(worldX, worldY) != clanId)
         {
             return;
         }
@@ -822,7 +864,7 @@ public sealed class AgentClanSystem
         int currentX = (int)MathF.Floor(agent.X);
         int currentY = (int)MathF.Floor(agent.Y);
 
-        if (TryFindNearestMatureBush(currentX, currentY, _agentPaths[index]))
+        if (TryFindNearestMatureBush(currentX, currentY, agent.ClanId, _agentPaths[index]))
         {
             List<int> path = _agentPaths[index];
             if (path.Count == 0)

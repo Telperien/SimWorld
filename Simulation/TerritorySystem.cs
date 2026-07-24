@@ -25,14 +25,30 @@ public sealed class TerritorySystem
 {
     public const uint NoOwner = uint.MaxValue;
 
+    // Fraction minimale de tuiles walkable pour qu'une région soit
+    // revendicable -- définition STRUCTURELLE de "qu'est-ce qu'une
+    // région" (un lac n'a pas de sens comme territoire), pas un
+    // réglage d'équilibrage : reste une constante interne, jamais
+    // dans simulation.json. Bas délibérément (pas 0,5) : un foyer
+    // valide (toujours sur une tuile walkable) peut légitimement
+    // tomber près d'une côte, dans une région à MAJORITÉ eau --
+    // n'exclut que les régions VRAIMENT lacustres, jamais une région
+    // simplement côtière (vérifié empiriquement : 0,5 rendait des
+    // foyers réels non-revendicables, cf. session territoire).
+    private const double MinWalkableFractionToClaim = 0.1;
+
     private readonly SimulationConfig _config;
+    private readonly Catalog<TerrainType> _catalog;
+    private readonly TerrainSystem _terrainSystem;
     private readonly AgentClanSystem _agentClanSystem;
 
+    private readonly int _size;
     private readonly int _regionCellSize;
     private readonly int _regionGridWidth;
     private readonly int _regionGridHeight;
 
     private readonly uint[] _regionOwner;
+    private readonly bool[] _regionClaimable;
 
     // Buffers d'influence par clan, ping-pong (comme _foodGradientA/B
     // dans VegetationSystem), indexés clanIndex * regionCount + cell.
@@ -49,10 +65,15 @@ public sealed class TerritorySystem
 
     public uint[] RegionOwner => _regionOwner;
 
-    public TerritorySystem(int size, SimulationConfig config, AgentClanSystem agentClanSystem)
+    public bool[] RegionClaimable => _regionClaimable;
+
+    public TerritorySystem(int size, SimulationConfig config, Catalog<TerrainType> catalog, TerrainSystem terrainSystem, AgentClanSystem agentClanSystem)
     {
         _config = config;
+        _catalog = catalog;
+        _terrainSystem = terrainSystem;
         _agentClanSystem = agentClanSystem;
+        _size = size;
 
         _regionCellSize = Math.Max(1, (int)(size / config.TerritoryRegionsAcrossMap));
         _regionGridWidth = (size + _regionCellSize - 1) / _regionCellSize;
@@ -61,10 +82,38 @@ public sealed class TerritorySystem
         int regionCount = _regionGridWidth * _regionGridHeight;
         _regionOwner = new uint[regionCount];
         Array.Fill(_regionOwner, NoOwner);
+        _regionClaimable = new bool[regionCount];
 
         int bufferSize = agentClanSystem.ClanCount * regionCount;
         _influenceCurrent = new double[bufferSize];
         _influenceNext = new double[bufferSize];
+    }
+
+    // Eau exclue de l'appropriation (session territoire, rendu +
+    // confinement) : recalculé à CHAQUE tick territoire, comme
+    // l'appartenance elle-même -- le terrain peut changer après la
+    // construction (feu -> cendre, tests -> SetTerrainId), jamais figé.
+    private void RecomputeRegionClaimability()
+    {
+        int regionCount = RegionCount;
+        var walkableCount = new int[regionCount];
+        var totalCount = new int[regionCount];
+        for (int y = 0; y < _size; y++)
+        {
+            for (int x = 0; x < _size; x++)
+            {
+                int cell = RegionIndex(x, y);
+                totalCount[cell]++;
+                if (_catalog.Get(_terrainSystem.Terrain[y * _size + x]).Walkable)
+                {
+                    walkableCount[cell]++;
+                }
+            }
+        }
+        for (int cell = 0; cell < regionCount; cell++)
+        {
+            _regionClaimable[cell] = totalCount[cell] > 0 && (double)walkableCount[cell] / totalCount[cell] >= MinWalkableFractionToClaim;
+        }
     }
 
     public int RegionIndex(int x, int y)
@@ -75,6 +124,8 @@ public sealed class TerritorySystem
     }
 
     public uint GetRegionOwnerAt(int x, int y) => _regionOwner[RegionIndex(x, y)];
+
+    public bool IsRegionClaimableAt(int x, int y) => _regionClaimable[RegionIndex(x, y)];
 
     // Diagnostic (valeur d'influence brute post-diffusion, avant
     // seuillage) -- lecture pure, utile pour calibrer
@@ -109,6 +160,8 @@ public sealed class TerritorySystem
 
     public void TickTerritory()
     {
+        RecomputeRegionClaimability();
+
         int clanCount = _agentClanSystem.ClanCount;
         int regionCount = RegionCount;
 
@@ -168,6 +221,12 @@ public sealed class TerritorySystem
         // premier clan trouvé (ordre 0..ClanCount-1, déterministe).
         for (int cell = 0; cell < regionCount; cell++)
         {
+            if (!_regionClaimable[cell])
+            {
+                _regionOwner[cell] = NoOwner;
+                continue;
+            }
+
             int bestClanIndex = -1;
             double bestValue = _config.TerritoryClaimThreshold;
             for (int c = 0; c < clanCount; c++)

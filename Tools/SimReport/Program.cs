@@ -609,6 +609,35 @@ double largestShare = world.RegionCount > 0 ? (double)largestClanRegions / world
 Console.WriteLine($"  Regions neutres : {neutralRegions,5} / {world.RegionCount,5}");
 Console.WriteLine($"  Part du plus gros clan : {largestShare,6:P1}");
 
+// Buissons murs ACCESSIBLES par clan (session confinement) : le
+// chiffre qui compte maintenant que la recolte est bornee au
+// territoire -- un buisson mur existe peut-etre, mais s'il n'est pas
+// dans le territoire du clan, il ne nourrit personne.
+vegetationCatalog.TryGetId("bush", out byte bushTypeForAccess);
+int bushMatureStage = vegetationCatalog.Get(bushTypeForAccess).MatureStage;
+int[] accessibleMatureBushes = new int[world.ClanCount];
+for (int i = 0; i < world.BushCount; i++)
+{
+    Vegetation bush = world.GetVegetation(i);
+    if (bush.Stage < bushMatureStage)
+    {
+        continue;
+    }
+    uint owner = world.GetRegionOwnerAt(bush.X, bush.Y);
+    for (int c = 0; c < world.ClanCount; c++)
+    {
+        if (world.GetClan(c).Id == owner)
+        {
+            accessibleMatureBushes[c]++;
+            break;
+        }
+    }
+}
+for (int c = 0; c < world.ClanCount; c++)
+{
+    Console.WriteLine($"  Clan {c} : buissons murs accessibles={accessibleMatureBushes[c],5}");
+}
+
 // Histogrammes des ages a 4 instants choisis APRES COUP sur la courbe
 // de population deja collectee (session 14b, diagnostic boom-bust) :
 // baseline (premier echantillon), pic (argmax pop), creux suivant le

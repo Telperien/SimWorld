@@ -1246,3 +1246,86 @@ marqué Skip) -- non touché ici, hors scope.
 - Golden-hash : cassé (attendu, nouvel état réel dans `Hash()`),
   recalculé : `18037449294380057181`.
 - `git status` : commit dédié, permission avant push.
+
+## Session territoire — rendu bordure, confinement des agents
+
+### Contexte
+Le territoire (session précédente) était invisible sur l'herbe sombre
+moucheté (visible seulement sur l'eau, où ça n'a aucun sens). Cette
+session corrige le rendu (bordure nette plutôt que remplissage,
+exclusion de l'eau) et transforme le territoire en contrainte réelle :
+les agents sont confinés, les ressources ne sont accessibles que dans
+le territoire du clan.
+
+### Rendu
+Remplissage réduit à peine perceptible (0,22→0,08), bordure renforcée
+et élargie (0,45→0,55, marge 1→2 tuiles) pour rester lisible au
+dézoom. Eau exclue de l'appropriation : `TerritorySystem` calcule
+maintenant la fraction de tuiles walkable par région (recalculée à
+chaque tick territoire, pas figée à la construction -- le terrain
+peut changer après coup, tests inclus) ; en dessous de 10% walkable,
+la région reste `NoOwner` quelle que soit son influence. Seuil bas
+délibérément : à 50% (première tentative), un foyer parfaitement
+valide (toujours sur tuile walkable) tombant près d'une côte rendait
+sa PROPRE région non-revendicable -- mesuré, pas deviné, corrigé.
+
+### Confinement — design révisé après mesure, pas décidé à l'aveugle
+Première implémentation : mouvement ET ressource strictement bornés
+au territoire du CLAN PROPRE (candidat valide seulement si
+`GetRegionOwnerAt == agent.ClanId`). Cassait 5 tests existants après
+implémentation. Diagnostic direct (pas supposé) : une région change
+de main à CHAQUE tick territoire (re-semée depuis la population
+courante, sans mémoire, par design) -- un agent debout sur une région
+qui vient de repasser neutre ou de basculer vers un rival n'avait
+alors plus AUCUNE case candidate valide et restait figé en
+permanence. Confirmé sur un run ordinaire (pas un cas construit) :
+4 agents sur 5 échantillonnés se trouvaient hors de leur propre
+territoire à un instant donné.
+
+**Design retenu** : le MOUVEMENT (errance, suivi de gradient) reste
+possible en terrain NEUTRE, bloqué seulement en territoire RIVAL. La
+RESSOURCE (BFS de récolte, `TryEnqueue`) reste strictement bornée au
+territoire du clan -- c'est elle qui porte "les ressources ne sont
+accessibles que dans le territoire du clan", pas le simple
+déplacement. Golden-hash recalculé une seconde fois après ce
+changement.
+
+### Le verrou — les deux nombres mesurés
+(a) Apparition d'un buisson spontané : `G` (tuiles d'herbe par région
+revendiquée) mesuré directement -- **≈159** (seed 42, 512², 100k
+ticks, moyenne sur 3 clans). Formule appliquée aux constantes réelles
+(`VegetationSpontaneousChance=0,003`, un passage par seconde réelle) :
+`E[secondes] = 1/(1-0,997^159) ≈ 2,6 s`.
+(b) Extinction par vieillesse seule : `lifespanTicks=200000 ±
+60000` → dernier agent d'une population fraîche proche de la borne
+haute (260000 ticks) ≈ **144 minutes**.
+**Verdict : (a) est ~3300x plus rapide que (b)** -- la repousse
+spontanée gagne la course avec une marge considérable. Confirmé, pas
+supposé -- `Clan_SurvivesFoodlessStart` (5000 ticks, marge large)
+prouve une vraie récolte post-repousse, pas une survie accidentelle.
+
+### Tests
+`Harvester_StaysWithinTerritory` (remplace `Harvester_CanLeaveTerritory`,
+comportemental -- laisse l'IA échouer naturellement, pas de
+téléportation via seams), `Territory_DoesNotClaimWater`,
+`Clan_SurvivesFoodlessStart` (nouveaux) + `Territory_ExpandsFromHome`/
+`Territory_TwoClansFormBorder`/`Territory_IsDeterministic` (conservés).
+`Slow_Population_RemainsViable_LongRun` : commentaire mis à jour
+(l'ancienne prémisse "aucune restriction" est fausse). Golden-hash
+final : `9842070533902850390`.
+
+### Observation SimReport
+À tick 5000 (juste après formation du territoire, avant la pression de
+récolte) : ~400-480 buissons murs accessibles par clan. À 100k ticks :
+0 pour les 3 clans -- pas un bug, la population a activement consommé
+les buissons localement accessibles plus vite que la repousse ne les
+remplace (dynamique de pression réelle, cohérente avec l'écosystème).
+
+### Vérification
+- `dotnet build` (5 projets) : tous verts.
+- `dotnet test --filter "Speed!=Slow"` : 62/62 verts.
+- `dotnet test --filter "Speed=Slow"` : non relancé cette session
+  (déjà en attente depuis la session précédente).
+- Golden-hash : cassé deux fois (eau + design révisé du confinement),
+  valeur finale signalée ci-dessus.
+- `git status` : commit dédié, permission avant push.

@@ -42,5 +42,5 @@
   "territoryDiffusionRate": 0.3,
   "territoryDiffusionIterations": 8,
   "territoryPopulationWeight": 1.0,
-  "territoryClaimThreshold": 0.15
+  "territoryClaimThreshold": 0.01
 }

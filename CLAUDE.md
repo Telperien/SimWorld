@@ -139,9 +139,22 @@ deadlock en puissance.
 Le territoire d'un clan vit sur une grille grossière (régions),
 jamais par tuile. Il s'étend par influence map diffusée en double
 buffer (même pattern que le feu et le gradient de nourriture), sur
-le tick lent. Le territoire est un STOCK et entre dans Hash(). Les
-agents ne sont PAS restreints à leur territoire (un cueilleur en
-sort librement).
+le tick lent. Le territoire est un STOCK et entre dans Hash().
+
+Les ressources ne sont accessibles QUE dans le territoire du clan
+(corrige la règle précédente) : un cueilleur ne trouve jamais un
+buisson hors des régions possédées par son clan. Le DÉPLACEMENT reste
+plus permissif que la ressource : un agent peut traverser du terrain
+neutre, seul le territoire d'un clan RIVAL lui est fermé — un
+confinement strict "mon clan uniquement" a été essayé puis abandonné
+(mesuré, pas supposé) : une région change de main à chaque tick
+territoire, sans mémoire, donc un agent debout sur une région qui
+vient de repasser neutre n'avait plus aucune case candidate valide et
+restait figé en permanence. La repousse spontanée de végétation est
+ce qui empêche un clan sans buisson initial d'être verrouillé
+définitivement — mesuré, très inférieure au temps d'extinction par
+vieillesse seule. L'expansion territoriale reste pilotée par la
+population, et plus tard par les bâtiments.
 
 ## Récolte — réservation de cible
 - Un agent qui cible un buisson/gisement pour récolte le RÉSERVE :
